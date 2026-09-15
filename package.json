@@ -7,7 +7,8 @@
   "scripts": {
     "build": "tsc",
     "start": "npm run build && node server.mjs",
-    "test": "npm run build && node scripts/smoke.mjs"
+    "test": "npm run build && node scripts/smoke.mjs",
+    "debug": "npm run build && node server.mjs"
   },
   "devDependencies": {
     "typescript": "^5.5.0"

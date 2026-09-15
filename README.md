@@ -62,6 +62,21 @@ toggle; C·E·G is preselected. Duplicates aren't possible, order doesn't matter
 ## Tech
 
 Vanilla TypeScript → ES modules, no frameworks, zero runtime dependencies.
-Web Audio synthesis in `src/audio.ts` (oscillators + lowpass + pluck envelope).
+
+**Sound.** Every note is a physically-modeled plucked string: a Karplus–Strong
+delay-line resonator (`src/synth/pluck-worklet.ts`) with a pick-attack transient,
+body-resonance EQ, a small room tail, and per-note humanization (detune, timing
+jitter, an attack scoop on the low strings, and a slight stereo spread with bass
+left / treble right). Guitar chords strum treble → bass one string at a time
+(~120 ms apart, ±jitter so it doesn't tick like a sequencer) and piano voicings
+roll ~8 ms so voices don't fuse. All of it — including the strum roll,
+per-string timbre variation, and pan — is tunable from one config constant:
+`DEFAULT_CONFIG` in `src/synth/config.ts`. The piano uses the same
+plucked-string voice; solo keys strike clean (no scoop).
+
+**Debugging the sound.** `npm run debug` then open
+`/debug/audio-debug.html`: it auto-strums a few chords and shows the RMS
+envelope, the exact count/timing of scheduled voices (ground truth for "is it
+one string or not"), and the strongest spectral peaks of the ring.
 
 See `AGENTS.md` for architecture and invariants.

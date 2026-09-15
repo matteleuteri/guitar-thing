@@ -38,7 +38,19 @@ The app is served over HTTP (`http://localhost:5173`). ES modules do not load fr
 - `src/piano.ts` — `findPianoKeys` + `findPianoVoicings` (piano core algorithm).
 - `src/render.ts` — DOM builders: `el()`, `colorFor()`, `renderPositions()`,
   `renderChordDiagram()`, `renderPiano()`/`renderPianoVoicing()`, finger/barre helpers.
-- `src/audio.ts` — Web Audio pluck synthesis (`playVoicing`, `playNotes`, `stopAudio`).
+- `src/audio.ts` — public sound API (`playVoicing`, `playNotes`, `stopAudio`);
+  lazy `AudioContext` + shared graph, worklet loading, per-note scheduling.
+- `src/synth/config.ts` — single `PluckAudioConfig`/`DEFAULT_CONFIG` with every
+  sound knob (string sustain/brightness, pick attack, scoop, detune/jitter/peak,
+  body EQ, room tail, ring length).
+- `src/synth/pluck-worklet.ts` — `registerProcessor("pluck-string")`: a
+  Karplus–Strong physical string running on the audio thread. Self-contained:
+  must NOT be imported by main-thread code (its `registerProcessor` would crash);
+  `audio.ts` loads it with `audioWorklet.addModule(new URL("./synth/pluck-worklet.js", import.meta.url).href)`.
+  Gotcha (bit us): node options arrive as the **processor constructor argument**;
+  there is no `this.options` — read `options.processorOptions` in the constructor.
+- `src/synth/shared.ts` — shared post-string chain: voice bus → body peaking EQ →
+  dry + damped feedback-delay room → master gain → compressor.
 - `src/main.ts` — UI wiring, form handling, guitar/piano orchestration (entry point).
 - `scripts/smoke.mjs` — Node checks of the compiled output.
 - `server.mjs` — zero-dep Node HTTP static file server (root = cwd).
@@ -115,12 +127,37 @@ Runtime dependencies: **none**. TypeScript is the only devDependency. No framewo
 
 ## Audio
 
-- `audio.ts` creates `AudioContext` lazily on first call — it must be triggered from a
-  user gesture (browser autoplay policy), which the `▶` click satisfies.
-- Each string = 2 oscillators (sawtooth at f, triangle at 2f) → per-note lowpass →
-  gain with pluck envelope → master gain → compressor → destination.
-- Strum offset low→high string by ~30 ms; bass string boosted. `stopAudio()` kills
-  anything still ringing.
+- `audio.ts` is asynchronous internally: `playVoicing`/`playNotes` are called
+  from click handlers but each schedules onto a promise chain so the first click
+  can await the `AudioWorklet` module load (first sound may lag one click).
+- Every note is a `pluck-string` worklet node (Karplus–Strong: excitation noise
+  into a damped self-resonating delay line tuned to `1/freq`). The processor
+  self-stops after `ringFrames`; `audio.ts` frees each node via a timer.
+- Voices share one graph (`shared.ts`): voice bus → body peaking EQ (low +
+  presence) → dry path *and* room tail (feedback delay, dampened lowpass) →
+  master gain → compressor → destination.
+- Voice separation is deliberate: a guitar voicing strums **top string first**
+  (treble → bass, like a downstroke), `strum.guitarMs` apart (default 70 ms)
+  plus a random ±`strum.jitterMs` so it doesn't sound metronomic; piano keys
+  roll every `strum.pianoMs` (8 ms). Each note gets a random
+  ±brightness/±sustain/±damping and ±velocity (`variation.*`) and a stereo
+  position sweeping bass-string-left → treble-string-right (`panning.spread`).
+  Without this a chord fuses into a single pluck — the transients are identical
+  and the rolls were too tight.
+- String "ring" is controlled by two knobs: `string.sustain` (per-sample loop
+  gain — a guitar-like long ring needs ~0.9998+, NOT ~0.99 which collapses in
+  ~100 ms) and `string.damping` (loop lowpass, 0 = bright/long harmonics,
+  1 = dull/short). Raising sustain + brightening damping is what stopped chords
+  from reading as one percussive blip.
+- Humanization (`startVoice`): random detune (`detuneCents`), start jitter
+  (`jitterMs`), and a per-string peak that boosts the bass string. The low two
+  strings get an attack pitch scoop; piano notes (`playNotes`) strike clean.
+- `stopAudio()` posts a `stop` message to every live worklet node and
+  disconnects it (simpler than the old oscillator teardown).
+- All knobs live in `src/synth/config.ts` (`DEFAULT_CONFIG`); the documented
+  shape of the pipeline is written in that file's header.
+- Note: Web Audio can't run under Node, so the smoke suite exercises no audio —
+  sound changes are verified by ear in the browser.
 
 ## Conventions & gotchas
 
@@ -137,3 +174,42 @@ Runtime dependencies: **none**. TypeScript is the only devDependency. No framewo
   (valid notes, full coverage, span ≤ limit).
 - If behavior needs changing, it's usually in `fretboard.ts` (search) or `main.ts`
   (what's listed / card layout).
+
+## Progress notes / debugging history
+
+Timeline of the audio work (the "still sounds like one string" saga):
+
+1. **First pass** — six `pluck-string` worklet nodes fired per voicing, but every
+   string shared one identical pluck tone and everything rang in near-perfect sync.
+   Result: it read as a single fused "plop".
+2. **Stereo + rolls** — added per-string panning (`panning.spread`), strum roll
+   (`strum.guitarMs`) and random ±timbre variation (`variation.*`). Better, but
+   still pressed into one note.
+3. **Root cause A: sustain & damping** — measured a single string's decay in
+   headless Chrome: `string.sustain: 0.996` (per-sample loop gain) collapses a
+   note in ~100 ms, and the fixed 0.5-averaging damping killed harmonics almost
+   instantly. Fixed by making loop damping a configurable one-pole filter
+   (`string.damping`, 0 = bright/long harmonics) and raising sustain to
+   `0.99985`. A chord now rings properly; harmonics last.
+4. **Root cause B: compressor squeeze** — the harsh output compressor was
+   slamming the whole six-string attack at once. Relaxed to ratio 2.5 / -16 dB.
+5. **Downstroke** — reversed the roll so the voicing strums **treble → bass**
+   (top string first, like a real hand), spaced `strum.guitarMs` apart (120 ms)
+   with hand-like ±`strum.jitterMs`. Added `variation.velocitySpread` so each
+   string hits at slightly different force.
+6. **Debug harness (keep!)**: `npm run debug` → open
+   `/debug/audio-debug.html`. Auto-strums a few open chords and shows (a) the
+   post-strum RMS envelope, (b) the exact scheduled voice log from
+   `getAudioDebugEvents()` (proving *how many* voices launched and when — this
+   is the ground truth for "is it one string or not"), and (c) the strongest
+   spectral peaks of the ring. `src/audio.ts` exposes `debugTap()` (pre-comp
+   master tap) and `getAudioDebugEvents()`; both are tiny, no-op-until-called,
+   and are intentionally permanent.
+
+Verified multi-string behaviour: headless run of the harness schedules 6 voices
+at ~120 ms steps, treble-first, pan sweeping left→right, and the sustain
+spectrum shows the full chord (C: E2/C3/G3/E3/C4/E4 all present) at healthy
+level after ~1.4 s. Remaining "still sounds fused" complaints are a *perceptual*
+timing/timbre question — turn `strum.guitarMs`, `strum.jitterMs`,
+`variation.*`, `panning.spread`, `string.sustain`, `string.damping` in
+`DEFAULT_CONFIG`, then re-check with the harness.

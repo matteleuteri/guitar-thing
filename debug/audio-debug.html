@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Audio debug</title>
+  <style>
+    body { font-family: ui-monospace, monospace; background: #141414; color: #d8d8d8; margin: 0; padding: 16px; }
+    h1 { font-size: 15px; margin: 0 0 6px; color: #8ec9ff; }
+    p.hint { font-size: 11px; color: #888; margin: 0 0 12px; }
+    .row { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+    button { background: #2a2a2a; color: #e6e6e6; border: 1px solid #444; border-radius: 4px; padding: 5px 12px; font: inherit; font-size: 12px; cursor: pointer; }
+    button:hover { background: #3a3a3a; }
+    #env { width: 640px; height: 140px; background: #0c0c0c; border: 1px solid #333; }
+    pre { font-size: 12px; line-height: 1.5; background: #0c0c0c; border: 1px solid #333; padding: 8px; min-height: 80px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>Audio debug harness</h1>
+  <p class="hint">Envelope + attack timeline + FFT of the master bus, tapped before the compressor.
+    Press "Strum" (or let it auto-strum on load) and watch the bars.</p>
+
+  <div class="row">
+    <canvas id="env" width="640" height="140"></canvas>
+  </div>
+
+  <div class="row">
+    <select id="preset">
+      <option value="openC">C open [0 3 2 0 1 0]</option>
+      <option value="openG">G open [3 2 0 0 0 3]</option>
+      <option value="openEm">Em open [0 2 2 0 0 0]</option>
+      <option value="openA">A open [0 0 2 2 2 0]</option>
+      <option value="barreF">F barre [1 3 3 2 1 1]</option>
+      <option value="single">Single E2 (one string)</option>
+    </select>
+    <button id="strum">Strum</button>
+    <button id="stop">Stop</button>
+    <button id="analyze">Envelope + attacks + FFT</button>
+  </div>
+
+  <h1>Analysis</h1>
+  <p id="status">idle</p>
+  <pre id="out"></pre>
+
+  <script type="module">
+    import { playVoicing, playNotes, stopAudio, debugTap, getAudioDebugEvents } from "../dist/audio.js";
+
+    const TUNING = [40, 45, 50, 55, 59, 64];
+    const PRESETS = {
+      openC: [0, 3, 2, 0, 1, 0],
+      openG: [3, 2, 0, 0, 0, 3],
+      openEm: [0, 2, 2, 0, 0, 0],
+      openA: [0, 0, 2, 2, 2, 0],
+      barreF: [1, 3, 3, 2, 1, 1],
+    };
+    const NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+    const NOTE_FREQ = (m) => 440 * Math.pow(2, (m - 69) / 12);
+    const midiOf = (f) => Math.round(69 + 12 * Math.log2(f / 440));
+    const nameOf = (f) => { const m = midiOf(f); return NAMES[m % 12] + (Math.floor(m / 12) - 1); };
+
+    const $ = (id) => document.getElementById(id);
+    const out = $("out");
+    const status = $("status");
+    const envCanvas = $("env");
+    const ectx = envCanvas.getContext("2d");
+
+    let tap = null;
+
+    function log(msg) {
+      out.textContent += msg + "\n";
+      console.log("[dbg] " + msg);
+    }
+
+    function strum(preset) {
+      stopAudio();
+      tap = debugTap();
+      if (tap) tap.fftSize = 1024; // 21ms window -> fine enough to resolve strum steps
+      if (preset === "single") {
+        playNotes([40]);
+        status.textContent = "played single E2";
+      } else {
+        playVoicing(PRESETS[preset], TUNING);
+        status.textContent = "played " + preset + " (" + PRESETS[preset].filter((f) => f !== null).length + " strings)";
+      }
+    }
+
+    $("strum").addEventListener("click", () => {
+      out.textContent = "";
+      strum($("preset").value);
+    });
+    $("stop").addEventListener("click", () => stopAudio());
+
+    function rms100ms() {
+      const buf = new Float32Array(tap.fftSize);
+      tap.getFloatTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+      return Math.sqrt(sum / buf.length);
+    }
+
+    function drawEnvelope(bins) {
+      ectx.clearRect(0, 0, envCanvas.width, envCanvas.height);
+      const w = envCanvas.width, h = envCanvas.height;
+      ectx.strokeStyle = "#4caf50";
+      ectx.lineWidth = 1.5;
+      ectx.beginPath();
+      const max = Math.max(...bins, 0.001);
+      for (let i = 0; i < bins.length; i++) {
+        const x = (i / bins.length) * w;
+        const y = h - (bins[i] / max) * (h - 8);
+        i === 0 ? ectx.moveTo(x, y) : ectx.lineTo(x, y);
+      }
+      ectx.stroke();
+      ectx.fillStyle = "#666";
+      ectx.font = "10px monospace";
+      ectx.fillText("X = 10ms per tick, Y = RMS (pegged to max=" + max.toFixed(3) + ")", 4, 12);
+    }
+
+    function detectAttacks(bins, stepMs) {
+      // Onset = a rising step in the RMS envelope that's a clear fraction of
+      // its own level, with a refractory gap so one sustained note can't retrigger.
+      const out = [];
+      let last = -100;
+      for (let i = 3; i < bins.length; i++) {
+        const d = bins[i] - bins[i - 1];
+        if (i - last >= 6 && d > 0.004 && d > bins[i] * 0.06) {
+          out.push(i * stepMs);
+          last = i;
+        }
+      }
+      return out;
+    }
+
+    $("analyze").addEventListener("click", () => {
+      out.textContent = "";
+      if (!tap) { log("no analyser yet — click Strum first"); return; }
+      log("BEGIN analysis (waiting 1500ms…)");
+      const pts = [];
+      const STEP = 10;
+      const N = 100; // 1 second of data
+      for (let i = 0; i <= N; i++) {
+        setTimeout(() => pts.push([i, rms100ms()]), i * STEP);
+      }
+      setTimeout(() => {
+        const windowMs = rms100ms;
+        const bins = pts.map(([, v]) => v);
+        drawEnvelope(bins);
+
+        const evs = getAudioDebugEvents();
+        const t0 = evs.length ? evs[0].t : 0;
+        const busy = evs.filter((e) => e.peak > 0);
+        log("Scheduled voices (" + evs.length + "):");
+        for (const e of evs) {
+          log("  +" + ((e.t - t0) * 1000).toFixed(0).padStart(4) + "ms  " + e.freq.toFixed(1) + "Hz" +
+              "  peak=" + e.peak.toFixed(3) + "  pan=" + e.pan.toFixed(2) + "  ~" + nameOf(e.freq));
+        }
+        const spacing = evs.length > 1 ? (evs[1].t - evs[0].t) * 1000 : 0;
+        log("→ " + evs.length + " voice(s) scheduled, " + spacing.toFixed(0) + "ms apart" +
+            (evs.length >= 5 ? " — scheduling is NOT the problem" : " — voices missing!"));
+
+        const attacks = detectAttacks(bins, STEP);
+        log("RMS max=" + Math.max(...bins).toFixed(4) + " min(tail)=" + Math.min(...bins.slice(60)).toFixed(4));
+        log("Envelope detects " + attacks.length + " rising step(s): " + (attacks.length ? attacks.map((ms) => ms + "ms").join(", ") : "none"));
+        log("→ envelope rises into a sustained ring; audibility of individual hits must be judged by ear.");
+
+        const freq = new Float32Array(tap.frequencyBinCount);
+        tap.getFloatFrequencyData(freq);
+        const sr = tap.context.sampleRate;
+        const peaks = [];
+        for (let i = 5; i < freq.length - 1; i++) {
+          if (freq[i] > freq[i - 1] && freq[i] >= freq[i + 1] && freq[i] > -80) {
+            peaks.push([(i * sr) / (2 * tap.fftSize), freq[i]]);
+          }
+        }
+        peaks.sort((a, b) => b[1] - a[1]);
+        log("Strongest spectral peaks (top 12):");
+        for (const [hz, db] of peaks.slice(0, 12)) {
+          log("  " + hz.toFixed(1).padStart(7) + " Hz  " + db.toFixed(0).padStart(4) + " dB  ~" + nameOf(hz));
+        }
+        log("END analysis");
+      }, (N + 1) * STEP + 50);
+    });
+
+    // Auto-strum on load so headless verification works too.
+    setTimeout(() => { strum("openC"); }, 120);
+    setTimeout(() => $("analyze").click(), 160);
+  </script>
+</body>
+</html>
