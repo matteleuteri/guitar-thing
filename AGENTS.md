@@ -76,9 +76,17 @@ Runtime dependencies: **none**. TypeScript is the only devDependency. No framewo
 - `renderPiano`/`renderPianoVoicing` draw an 88-key-style keyboard (white keys in a
   flex row, black keys absolutely positioned by white-key-count offset).
 - Notes are selected from a **12-slot grid** (`#note-grid`; default C·E·G), toggled in
-  `main.ts`; colors reuse `colorFor(pc)`. The old free-text parsing (`parseNotes`) still
+  `main.ts`; colors reuse `colorFor(pc)`. Buttons show both spellings via `noteLabels(pc)`
+  (`SHARP_NAMES`/`FLAT_NAMES` in `theory.ts`, e.g. "C#/Db"), used only on the grid —
+  dots/cards/legend stick to sharps. The old free-text parsing (`parseNotes`) still
   exists for the smoke tests and the custom-tuning parser (`parseStringMidi`, accepts
   `note + octave`, e.g. `Db3`). Spelling docs live in `README.md` under "Note selection".
+- Instrument-aware language: section headings, the span label, and card wording switch
+  ("Fretboard positions"→"Keyboard positions", "Chord fingerings"→"Chord voicings",
+  span: "frets" vs "keys"). Per-instrument span values are remembered (guitar default 5,
+  piano default 12) and restored on switch (`spans`/`SPAN_DEFAULTS`/`saveSpan` in
+  `main.ts`, tracked via `currentInstrument` — reading `select.value` in the `change`
+  handler gives the NEW value, so save the previous one first).
 - `chordName(pcs)` identifies via interval-pattern dictionary keyed from a candidate
   root; prefers the lowest pitch class as root; returns `{primary, alternatives}`.
 
@@ -95,6 +103,15 @@ Runtime dependencies: **none**. TypeScript is the only devDependency. No framewo
   fretted position, finger-number footer, barre annotations, sounding-note string.
   A `▶` play button (`.cd-play`, absolutely positioned top-right; extra right padding
   keeps it clear of the diagram) calls `playVoicing(frets, tuning)`.
+- Piano keyboards are sized by one CSS variable `--key-w` (set by the piano-only
+  **"Key size (rem)"** input via `applyKeySize` in `main.ts`, default 3). White-key
+  width cap, keyboard/board height, and label fonts all derive from it in `style.css`
+  with `calc(...)`, keeping the piano ratio; keyboards are capped-width + centered
+  (`margin: 0 auto`) so keys don't stretch wide. Black keys render as children of the
+  white-key row so their `left: (leftCount / whiteCount * 100)%` stays exact.
+- Click-to-play: every keyboard key (`playNotes([midi])`) and every fretboard
+  position dot (`playNotes([tuning[s] + f])`) plays its own note on click; voicing
+  mini-keyboards are key-playable too, alongside their ▶ whole-voicing button.
 
 ## Audio
 
