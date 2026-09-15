@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Note/Chord Finder</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>Note/Chord Finder</h1>
+    <p>
+      Give it a set of notes: it highlights every spot on the fretboard where those notes live,
+      then finds chord fingerings (muted strings allowed) where every chord note is played and
+      all fretted positions lie within a small fret span.
+    </p>
+  </header>
+
+  <section id="controls">
+    <div class="note-picker">
+      <span class="note-picker-label">Notes</span>
+      <div id="note-grid" class="note-grid"></div>
+    </div>
+    <form id="form" autocomplete="off">
+      <div class="field">
+        <label for="instrument">Instrument</label>
+        <select id="instrument">
+          <option value="guitar">Guitar</option>
+          <option value="piano">Piano</option>
+        </select>
+      </div>
+      <div id="guitar-only">
+        <div class="field">
+          <label for="tuning">Tuning</label>
+          <select id="tuning"></select>
+        </div>
+        <div class="field">
+          <label for="frets">Frets</label>
+          <input id="frets" type="number" min="7" max="24" value="15" />
+        </div>
+      </div>
+      <div id="piano-only" hidden>
+        <div class="field">
+          <label for="piano-low">Lowest key (MIDI)</label>
+          <input id="piano-low" type="number" min="21" max="108" value="48" />
+        </div>
+        <div class="field">
+          <label for="piano-high">Highest key (MIDI)</label>
+          <input id="piano-high" type="number" min="21" max="108" value="84" />
+        </div>
+        <div class="field">
+          <label for="key-size">Key size (rem)</label>
+          <input id="key-size" type="number" min="1.5" max="6" step="0.2" value="3" />
+        </div>
+      </div>
+      <div class="field">
+        <label for="span" id="span-label">Max span</label>
+        <input id="span" type="number" min="1" max="24" value="5" />
+      </div>
+      <div class="field">
+        <label for="cap">Max results / chord</label>
+        <input id="cap" type="number" min="1" max="10000" value="500" />
+      </div>
+      <div class="field">
+        <button type="submit">Find</button>
+      </div>
+    </form>
+
+    <details id="custom-tuning" hidden>
+      <summary>Custom tuning strings (low → high, note + optional octave, e.g. E2 A2 D3 G3 B3 E4)</summary>
+      <div class="custom-strings">
+        <input value="E2" /><input value="A2" /><input value="D3" /><input value="G3" /><input value="B3" /><input value="E4" />
+      </div>
+    </details>
+
+    <p id="error" class="error" hidden></p>
+  </section>
+
+  <section id="positions">
+    <h2 id="positions-title">Fretboard positions</h2>
+    <div id="legend"></div>
+    <div id="positions-board" class="scroll-x"></div>
+  </section>
+
+  <section id="chords">
+    <h2><span id="chords-title">Chord fingerings</span> <span id="chord-summary" class="muted"></span></h2>
+    <div id="chord-list"></div>
+  </section>
+
+  <script type="module" src="./dist/main.js"></script>
+</body>
+</html>

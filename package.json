@@ -1,0 +1,15 @@
+{
+  "name": "guitar-thing",
+  "version": "1.0.0",
+  "description": "Guitar fretboard note locator and chord fingering finder",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "start": "npm run build && node server.mjs",
+    "test": "npm run build && node scripts/smoke.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  }
+}
