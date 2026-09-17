@@ -15,6 +15,30 @@ npm start        # builds + serves on http://localhost:5173
 > The app must be served over HTTP (`file://` blocks ES modules), so use the included
 > `server.mjs` rather than opening `index.html` directly.
 
+## Run locally
+
+```sh
+npm run build       # compile TS to dist/
+node server.mjs     # serve on http://localhost:5173
+```
+
+`npm start` does both in one step. `npm test` builds and runs the smoke suite.
+
+## Deploy (GitHub Pages)
+
+The site is **live** at https://matteleuteri.github.io/guitar-thing/. Publishing is
+automatic — nothing to run by hand:
+
+1. Push to `main` (or merge a PR into it).
+2. `.github/workflows/pages.yml` builds `dist/` from the pushed source and deploys
+   it to Pages.
+3. The site updates ~1 minute later; watch the run with `gh run watch` or in the
+   Actions tab.
+
+Local work never touches the live site: your local `dist/` is gitignored, and the
+deployed build comes from CI, not your folder. Commit + push is the only thing that
+releases new code.
+
 ## Usage
 
 1. **Pick notes** — click pitch classes on the note grid to add or remove them. `C · E · G`

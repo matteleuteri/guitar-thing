@@ -25,9 +25,27 @@ A dependency-free browser app ("Note/Chord Finder") with two instrument modes:
 - `npm test` — build + `node scripts/smoke.mjs` (imports compiled `dist/`, asserts
   theory/fingering invariants + perf). Always run before declaring a change done.
 - `node server.mjs` directly to serve without rebuilding.
+- `npm run debug` — build, then serve so the audio harness at
+  `/debug/audio-debug.html` works.
 
 The app is served over HTTP (`http://localhost:5173`). ES modules do not load from
 `file://`, so the static server is required to try the UI.
+
+## Deployment (GitHub Pages)
+
+The live site is https://matteleuteri.github.io/guitar-thing/. It is **not** built
+from the local `dist/` (that folder is gitignored). CI owns it:
+
+- `.github/workflows/pages.yml` runs on every push to `main`: `npm ci` → `npm run
+  build` → copies `index.html`, `style.css`, `dist/`, `debug/` into `_site/` →
+  uploads as a Pages artifact → `actions/deploy-pages`. No secrets used.
+- Live site updates a minute or two after a push. `gh run watch` on the latest
+  run, or the Actions tab, shows progress/failures.
+- Local development is fully independent: edit → `npm run build` → `node
+  server.mjs` → `localhost:5173`. Committing without pushing never affects the
+  live site.
+- All asset paths in `index.html` (`style.css`, `./dist/main.js`, `debug/`) are
+  relative, so the `/guitar-thing/` subdirectory hosting works unchanged.
 
 ## Structure
 
