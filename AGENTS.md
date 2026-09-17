@@ -314,3 +314,11 @@ Policy:
   *quality* itself shape voicing (maj7 sparkly, minor dark, sus ambiguous,
   dim tense...). Not started — would be `roles` growing a quality axis. Build
   only after the user signs off on the current sound by ear.
+- **Muted-string sound.** Right now a muted string (`fret: null` in a fingering)
+  is silently skipped by `playVoicing`. On a real guitar a muted/palm-rested
+  string still makes a percussive "thunk"/muted-string sound, and that texture
+  is part of a chord's character. Idea: give muted strings a short, noise-heavy,
+  pitchless (or heavily damped) percussive voice so fingerings sound more
+  authentic — plausible as a new `mute` section in `DEFAULT_CONFIG` (level,
+  length, brightness) with a per-note worklet param for "muted" mode. Discuss
+  before building (how prominent it should be, and whether it's on by default).
