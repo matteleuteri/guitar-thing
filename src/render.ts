@@ -189,8 +189,11 @@ export function renderPiano(
 export function renderPianoVoicing(
   keys: number[],
   nameOf: (pc: number) => string,
+  id: number,
 ): HTMLElement {
   const box = keyboardEl(Math.min(...keys), Math.max(...keys), new Set(keys), nameOf, "kb", "pp");
+  box.appendChild(el("span", "cd-id", String(id)));
+  box.title = `Voicing ID ${id}`;
 
   const play = el("button", "cd-play", "▶");
   play.title = "Play voicing";
@@ -206,9 +209,12 @@ export function renderChordDiagram(
   fingering: Fingering,
   tuning: number[],
   nameOf: (pc: number) => string,
+  id: number,
 ): HTMLElement {
   const { frets } = fingering;
   const box = el("div", "chord-diagram");
+  box.appendChild(el("span", "cd-id", String(id)));
+  box.title = `Voicing ID ${id}`;
 
   const play = el("button", "cd-play", "▶");
   play.title = "Play voicing";

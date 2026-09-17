@@ -148,7 +148,10 @@ document.addEventListener("DOMContentLoaded", () => {
     );
 
     const grid = el("div", "diagrams");
-    for (const f of fingerings) grid.appendChild(renderChordDiagram(f, tuning, noteName));
+    for (let i = 0; i < fingerings.length; i++) {
+      const f = fingerings[i]!;
+      grid.appendChild(renderChordDiagram(f, tuning, noteName, i + 1));
+    }
     card.appendChild(grid);
     return card;
   }
@@ -175,7 +178,10 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     const grid = el("div", "diagrams");
-    for (const v of voicings) grid.appendChild(renderPianoVoicing(v.keys, noteName));
+    for (let i = 0; i < voicings.length; i++) {
+      const v = voicings[i]!;
+      grid.appendChild(renderPianoVoicing(v.keys, noteName, i + 1));
+    }
     card.appendChild(
       el("div", "chord-count", `${voicings.length} voicing${voicings.length === 1 ? "" : "s"}${truncated ? " (truncated)" : ""}`),
     );
