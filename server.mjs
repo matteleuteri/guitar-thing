@@ -27,7 +27,9 @@ createServer(async (req, res) => {
       return;
     }
     const data = await readFile(path);
-    res.writeHead(200, { "Content-Type": MIME[extname(path)] || "application/octet-stream" });
+    // Never let the browser cache during local development: a rebuilt dist/ or
+    // edited page must show up on plain refresh, not a stale cached copy.
+    res.writeHead(200, { "Content-Type": MIME[extname(path)] || "application/octet-stream", "Cache-Control": "no-store" });
     res.end(data);
   } catch {
     res.writeHead(404, { "Content-Type": "text/plain" });

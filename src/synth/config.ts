@@ -265,7 +265,7 @@ export const DEFAULT_CONFIG: PluckAudioConfig = {
     peak: 0.5,
   },
   strum: {
-    guitarMs: 120,
+    guitarMs: 140,
     pianoMs: 8,
     jitterMs: 24,
     // Treble bursts out fast, spacing grows into a pause before the bass hits.
