@@ -1,3 +1,4 @@
+import { DEFAULT_CONFIG } from "./synth/config.js";
 import { findFingerings, type Fingering } from "./fretboard.js";
 import { findPianoVoicings, type PianoVoicing } from "./piano.js";
 import { colorFor, el, renderChordDiagram, renderPiano, renderPianoVoicing, renderPositions } from "./render.js";
@@ -18,6 +19,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const pianoOnly = document.getElementById("piano-only") as HTMLDivElement;
   const tuningSelect = document.getElementById("tuning") as HTMLSelectElement;
   const fretsInput = document.getElementById("frets") as HTMLInputElement;
+  const strumInput = document.getElementById("strum") as HTMLInputElement;
   const pianoLowInput = document.getElementById("piano-low") as HTMLInputElement;
   const pianoHighInput = document.getElementById("piano-high") as HTMLInputElement;
   const keySizeInput = document.getElementById("key-size") as HTMLInputElement;
@@ -97,6 +99,15 @@ document.addEventListener("DOMContentLoaded", () => {
   }, { passive: false });
 
   keySizeInput.addEventListener("change", () => run());
+
+  // Top-level strum speed: lives on the shared config object so `playVoicing`
+  // picks it up on the next click. 0 = all strings strike together.
+  const applyStrum = () => {
+    const n = parseInt(strumInput.value, 10);
+    if (Number.isFinite(n)) DEFAULT_CONFIG.strum.guitarMs = Math.min(400, Math.max(0, n));
+  };
+  strumInput.addEventListener("input", applyStrum);
+  strumInput.addEventListener("change", applyStrum);
 
   const getTuning = (): number[] => {
     const t = TUNINGS.find((x) => x.id === tuningSelect.value)!;

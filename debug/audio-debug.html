@@ -153,7 +153,8 @@
           log("  +" + ((e.t - t0) * 1000).toFixed(0).padStart(4) + "ms  " + e.freq.toFixed(1) + "Hz" +
               "  " + e.role.padEnd(5) + " peak=" + e.peak.toFixed(3) + " pan=" + e.pan.toFixed(2) +
               "  b=" + e.brightness.toFixed(2) + " d=" + e.damping.toFixed(2) +
-              " s=" + e.sustain.toFixed(5) + " pk=" + e.pick.toFixed(2) + "  ~" + nameOf(e.freq));
+              " s=" + e.sustain.toFixed(5) + " pk=" + e.pick.toFixed(2) +
+              " att=" + e.attackMs + "ms  ~" + nameOf(e.freq));
         }
         const spacing = evs.length > 1 ? (evs[1].t - evs[0].t) * 1000 : 0;
         log("→ " + evs.length + " voice(s) scheduled, " + spacing.toFixed(0) + "ms apart" +

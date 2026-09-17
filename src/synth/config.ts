@@ -3,9 +3,10 @@
  * every knob maps to a named section of the audio pipeline:
  *
  * - `string`    the Karplus–Strong string model itself (loop damping/excitation).
- * - `voices`    fixed per-string character (wound/dark lows → thin/bright highs),
- *               so each note sounds like a *different* string, not a spread of
- *               one identical voice.
+ * - `voices`    fixed per-string identity (wound/dark lows → thin/bright highs)
+ *               — each string gets its own pickup-style EQ, attack envelope,
+ *               brightness/damping/sustain/scoop/pick. The core of "each string
+ *               makes its own sound".
  * - `roles`     persistent accents for the root pitch class vs the color tones.
  * - `attack`    the "pick scrape" highpassed noise transient on note start.
  * - `micro`     random humanization (detune + start-time jitter, base loudness).
@@ -35,6 +36,9 @@ export interface PluckAudioConfig {
    * Fixed character per guitar string, index 0 = thickest/lowest. These are the
    * *systematic* differences (wound lows vs plain highs) that let the ear pick
    * voices apart; random `variation` only adds a thin humanizing sliver on top.
+   * Each string is a full "pickup voicing": tone EQ (like a pickup position),
+   * attack envelope (bass thumps, treble snaps), noise brightness, loop damping,
+   * sustain, scoop and pick character.
    */
   voices: {
     /** Noise-burst loudness (0..1): higher = stringier/brighter articulation. */
@@ -47,6 +51,19 @@ export interface PluckAudioConfig {
     scoopCents: number;
     /** Pick-scrape transient level for this string (0..1). */
     pick: number;
+    /** Host-side gain ramp time in ms: slow = bass thump, fast = treble snap. */
+    attackMs: number;
+    /** Optional tone-shape EQ applied to this string only (pickup voicing). */
+    eq?: {
+      /** Low shelf cut for wound strings (Hz); darkens without killing lows. */
+      lowpassHz?: number;
+      /** Presence peak (Hz) — each string rings at its own resonant color. */
+      peakHz?: number;
+      /** Gain of the presence peak in dB. */
+      peakGainDb?: number;
+      /** Q of the presence peak. */
+      peakQ?: number;
+    };
   }[];
   /** Role accents: the root pitch class vs the color tones. */
   roles: {
@@ -160,18 +177,67 @@ export const DEFAULT_CONFIG: PluckAudioConfig = {
     excitationMs: 8,
   },
   voices: [
-    // Low E (wound): dark, heavy, long ring, big attack scoop, soft pick.
-    { brightness: 0.38, damping: 0.8, sustain: 0.99993, scoopCents: 26, pick: 0.1 },
-    // A (wound): still dark, slightly less so.
-    { brightness: 0.52, damping: 0.68, sustain: 0.99989, scoopCents: 18, pick: 0.14 },
-    // D (wound): the start of the "plain" mid range.
-    { brightness: 0.68, damping: 0.52, sustain: 0.99986, scoopCents: 0, pick: 0.2 },
-    // G (plain): brighter, snappier.
-    { brightness: 0.84, damping: 0.38, sustain: 0.99983, scoopCents: 0, pick: 0.26 },
-    // B (plain): bright and quick.
-    { brightness: 0.95, damping: 0.3, sustain: 0.99981, scoopCents: 0, pick: 0.34 },
-    // High E (plain): thin, glassy, aggressive pick scrape.
-    { brightness: 1.0, damping: 0.22, sustain: 0.99979, scoopCents: 0, pick: 0.42 },
+    // Low E (wound): dark body, slow thump, long ring, big attack scoop.
+    // Bright lows are shelved low and a warm 180 Hz peak gives it a neck-pickup thud.
+    {
+      brightness: 0.34,
+      damping: 0.82,
+      sustain: 0.99993,
+      scoopCents: 28,
+      pick: 0.12,
+      attackMs: 11,
+      eq: { lowpassHz: 1000, peakHz: 180, peakGainDb: 9, peakQ: 1.4 },
+    },
+    // A (wound): still dark/thumpy, slightly less so.
+    {
+      brightness: 0.48,
+      damping: 0.7,
+      sustain: 0.99989,
+      scoopCents: 20,
+      pick: 0.16,
+      attackMs: 9,
+      eq: { lowpassHz: 1250, peakHz: 200, peakGainDb: 7, peakQ: 1.2 },
+    },
+    // D (wound): the start of the "plain" mid range; clearer body, no scoop.
+    {
+      brightness: 0.64,
+      damping: 0.56,
+      sustain: 0.99986,
+      scoopCents: 2,
+      pick: 0.22,
+      attackMs: 6,
+      eq: { lowpassHz: 1800, peakHz: 260, peakGainDb: 5, peakQ: 1 },
+    },
+    // G (plain): snappy, warm presence around the guitar's mid "honk".
+    {
+      brightness: 0.82,
+      damping: 0.4,
+      sustain: 0.99983,
+      scoopCents: 0,
+      pick: 0.3,
+      attackMs: 4,
+      eq: { peakHz: 700, peakGainDb: 4, peakQ: 1.2 },
+    },
+    // B (plain): bright and quick, presence up around 1.8 kHz.
+    {
+      brightness: 0.94,
+      damping: 0.3,
+      sustain: 0.99981,
+      scoopCents: 0,
+      pick: 0.4,
+      attackMs: 3,
+      eq: { peakHz: 1800, peakGainDb: 6, peakQ: 1 },
+    },
+    // High E (plain): thin, glassy, aggressive scrape; presence 3.6 kHz.
+    {
+      brightness: 1.0,
+      damping: 0.22,
+      sustain: 0.99979,
+      scoopCents: 0,
+      pick: 0.5,
+      attackMs: 2,
+      eq: { peakHz: 3600, peakGainDb: 8, peakQ: 0.9 },
+    },
   ],
   roles: {
     rootVel: 1.18,

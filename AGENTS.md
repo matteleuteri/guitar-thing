@@ -155,15 +155,17 @@ Runtime dependencies: **none**. TypeScript is the only devDependency. No framewo
   presence) → dry path *and* room tail (feedback delay, dampened lowpass) →
   master gain → compressor → destination.
 - Voice separation is deliberate and **systematic**, not random. Each guitar
-  string has a fixed character in `voices[]` (index 0 = lowest/thickest): wound
-  lows are dark (`damping` high), heavy (low `pick`), and scoop the attack;
-  plain highs are glassy/bright (`brightness` → 1.0, `damping` low) with a
-  scrappy pick. On top, `roles.*` accents the root pitch class (root =
-  lowest sounding pc, derived inside `playVoicing` — no wiring needed): roots
-  are louder, slightly darker, lighter-picked, and ring a touch longer
-  (`rootSustainAdd`/`colorSustainAdd` are near-1 additions, not multipliers);
-  color tones get a brightness/pick lift so intervals articulate. Only a thin
-  random sliver (`variation.*`, deliberately small now) humanizes on top.
+  string has a fixed identity in `voices[]` (index 0 = lowest/thickest) — not
+  just brightness, but a full per-string profile: pickup-style EQ (`eq`:
+  dark lowpass + warm body peak on wound strings, rising presence peaks on the
+  plains), an attack envelope (`attackMs`: bass strings thump in slow, treble
+  snaps fast), plus `pick` scrape, `scoopCents`, sustain and damping. On top,
+  `roles.*` accents the root pitch class (root = lowest sounding pc, derived
+  inside `playVoicing` — no wiring needed): roots are louder, slightly darker,
+  lighter-picked, and ring a touch longer (`rootSustainAdd`/`colorSustainAdd`
+  are near-1 additions, not multipliers); color tones get a brightness/pick
+  lift so intervals articulate. Only a thin random sliver (`variation.*`,
+  deliberately small now) humanizes on top.
 - A guitar voicing strums **top string first** (treble → bass, like a
   downstroke) using `strum.pattern` (index = hit position, treble-first):
   the k-th hit starts `guitarMs * sum(pattern[0..k-1])` in, so the treble
@@ -184,7 +186,10 @@ Runtime dependencies: **none**. TypeScript is the only devDependency. No framewo
 - `stopAudio()` posts a `stop` message to every live worklet node and
   disconnects it (simpler than the old oscillator teardown).
 - All knobs live in `src/synth/config.ts` (`DEFAULT_CONFIG`); the documented
-  shape of the pipeline is written in that file's header.
+  shape of the pipeline is written in that file's header. Strum speed is also
+  user-configurable from the UI: the "Strum speed (ms)" input in the guitar
+  block writes `DEFAULT_CONFIG.strum.guitarMs` live (0 = all strings at once),
+  so audio settings need no code change to A/B.
 - Note: Web Audio can't run under Node, so the smoke suite exercises no audio —
   sound changes are verified by ear in the browser.
 
@@ -238,14 +243,20 @@ spectral peaks of the ring. `src/audio.ts` exposes `debugTap()` (pre-comp
     is provable at a glance.
 7. **Per-string identity + roles (the "smarter per-note sound")** — replaced the
    flat random timbre with `voices[]` (6 fixed string characters: wound/dark
-   lows → plain/bright highs, per-string pick + scoop), `roles.*` (root pitch
-   class louder/darker/longer, color tones brighter/more articulate), and a
+   lows → plain/bright highs) and `roles.*` (root pitch class
+   louder/darker/longer, color tones brighter/more articulate), plus a
    hand-shaped `strum.pattern` (`[0.9, 0.8, 0.8, 0.9, 1.1, 1.4]`: treble bursts
    out, wide final gap blooms into the bass). Random `variation.*` shrunk to a
-   thin sliver so the systematic structure dominates. All values verified
-   deterministically for open C: brightness 0.43→1.00, damping 0.78→0.19,
-   root Cs ring longest, strum 0/108/204/300/408/540 ms. Direction was agreed
-   with the user first (String + role + strum, pronounced separation).
+   thin sliver so the systematic structure dominates. Direction agreed with the
+   user first (String + role + strum, pronounced separation).
+8. **Per-string pickup voicings + attack envelopes** — user still heard "one
+   sound", so each `voices[s]` grew a real tonal identity beyond brightness:
+   an `eq` (dark lowpass + warm body peak for wound strings, rising presence
+   peaks 700→1800→3600 Hz for the plains — like guitar pickups) and an
+   `attackMs` envelope (bass 11 ms thump → treble 2 ms snap). Verified for
+   open C: brightness 0.38→1.00, damping 0.80→0.19, att 11→2 ms, eq
+   LP1000/PK180 → PK3600. The strum speed also became a top-level UI input
+   ("Strum speed (ms)", 0 = all at once) writing `cfg.strum.guitarMs` live.
 
 Verified multi-string behaviour: headless run of the harness schedules 6 voices
 at ~120 ms steps, treble-first, pan sweeping left→right, and the sustain

@@ -85,6 +85,10 @@ interface VoiceParams {
   pan: number;
   /** "root" when the note is the chord's root pitch class, else "color". */
   role: "root" | "color";
+  /** Host-side gain ramp in ms: slow = bass thump, fast = treble snap. */
+  attackMs: number;
+  /** Optional per-string tone EQ (pickup voicing) applied before the volume stage. */
+  eq?: { lowpassHz?: number; peakHz?: number; peakGainDb?: number; peakQ?: number };
 }
 
 /** One plucked string at `t`. */
@@ -103,6 +107,7 @@ function startVoice(freq: number, t: number, p: VoiceParams, cfg: PluckAudioConf
     damping: p.damping,
     sustain: p.sustain,
     pick: p.pick,
+    attackMs: p.attackMs,
   });
 
   const node = new AudioWorkletNode(ctx, "pluck-string", {
@@ -120,11 +125,35 @@ function startVoice(freq: number, t: number, p: VoiceParams, cfg: PluckAudioConf
     },
   });
 
+  // Each string gets its own pickup-style tone EQ before the volume stage,
+  // so it rings with a genuinely different color — not just a brightness knob.
+  let tail: AudioNode = node;
+  if (p.eq) {
+    if (p.eq.lowpassHz) {
+      const f = ctx.createBiquadFilter();
+      f.type = "lowpass";
+      f.frequency.value = p.eq.lowpassHz;
+      f.Q.value = 0.7;
+      tail.connect(f);
+      tail = f;
+    }
+    if (p.eq.peakHz) {
+      const f = ctx.createBiquadFilter();
+      f.type = "peaking";
+      f.frequency.value = p.eq.peakHz;
+      f.gain.value = p.eq.peakGainDb ?? 0;
+      f.Q.value = p.eq.peakQ ?? 1;
+      tail.connect(f);
+      tail = f;
+    }
+  }
+
   // Fade in over a few ms so the noise burst can't click; `peak` sets volume.
+  // `attackMs` varies per string: bass strings thump in slow, treble snaps fast.
   const g = ctx.createGain();
   g.gain.setValueAtTime(0.0001, start);
-  g.gain.exponentialRampToValueAtTime(Math.max(0.02, p.peak), start + 0.004);
-  node.connect(g);
+  g.gain.exponentialRampToValueAtTime(Math.max(0.02, p.peak), start + Math.max(0.0002, p.attackMs / 1000));
+  tail.connect(g);
   // Pan spreads the strings across the stereo field (0 = center, e.g. piano).
   const panner = ctx.createStereoPanner();
   panner.pan.value = p.pan;
@@ -199,7 +228,7 @@ export function playVoicing(frets: (number | null)[], tuning: number[]): void {
       const sustain = clamp01(v.sustain + (isRoot ? r.rootSustainAdd : r.colorSustainAdd) + (Math.random() * 2 - 1) * cfg.variation.sustainSpread);
       const pick = clamp01(v.pick * (isRoot ? r.rootPick : r.colorPick));
       const scoop = v.scoopCents;
-      startVoice(midiToFreq(midi), base + Math.max(0, off), { scoopCents: scoop, peak, brightness, damping, sustain, pick, pan, role }, cfg);
+      startVoice(midiToFreq(midi), base + Math.max(0, off), { scoopCents: scoop, peak, brightness, damping, sustain, pick, pan, role, attackMs: v.attackMs, eq: v.eq }, cfg);
     }
   });
 }
@@ -227,6 +256,7 @@ export function playNotes(midis: number[]): void {
           pick: cfg.attack.pickLevel,
           pan: 0,
           role: "color",
+          attackMs: 3,
         },
         cfg,
       );
@@ -264,6 +294,8 @@ export interface AudioDebugEvent {
   sustain: number;
   /** Pick-scrape level of this voice (0..1). */
   pick: number;
+  /** Host-side gain ramp in ms. */
+  attackMs: number;
 }
 
 /** Ring buffer of the most recent scheduled voices. Zero-cost unless read. */
