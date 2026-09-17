@@ -231,3 +231,26 @@ level after ~1.4 s. Remaining "still sounds fused" complaints are a *perceptual*
 timing/timbre question — turn `strum.guitarMs`, `strum.jitterMs`,
 `variation.*`, `panning.spread`, `string.sustain`, `string.damping` in
 `DEFAULT_CONFIG`, then re-check with the harness.
+
+## Dev branches & the frozen public site
+
+The user wants the live Pages site **frozen as-is** while audio work continues.
+Policy:
+
+- `.github/workflows/pages.yml` only deploys on push to `main`. Anything committed
+  to any other branch never touches the live site.
+- All in-progress audio/experimental work happens on the `dev-audio` branch;
+  `main` only receives changes the user approves for release.
+- Local dev loop (unchanged): `npm run build && node server.mjs` →
+  `localhost:5173`; `npm test` as the gate. Audio experiments are tuned via
+  `DEFAULT_CONFIG`, verified with the `/debug/audio-debug.html` harness.
+
+## Backlog / ideas (told to hold, discuss later)
+
+- **Smarter per-note sound inside a chord.** Today every string gets the same
+  K-S voice with only random variation. Idea: make each note's timbre/attack/
+  volume/spacing *voicing-aware* instead of matching random spread — e.g. root
+  vs third vs seventh roles, low vs high register, string order in the strum,
+  and possibly chord-quality-specific behaviour. Goal: chords read as distinct
+  notes (the user still perceives strings as "one sound"). Do not build this
+  without an explicit discussion of the direction first.
