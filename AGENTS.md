@@ -23,7 +23,9 @@ A dependency-free browser app ("Note/Chord Finder") with two instrument modes:
 - `npm run build` — compile TS (`src/` → `dist/` via `tsc`, tsconfig at repo root).
 - `npm start` — build, then run `node server.mjs` (zero-dep static server, port 5173).
 - `npm test` — build + `node scripts/smoke.mjs` (imports compiled `dist/`, asserts
-  theory/fingering invariants + perf). Always run before declaring a change done.
+  theory/fingering invariants + perf) + `node scripts/audio-sched.mjs` (stubs Web
+  Audio to assert the voice-graph strum/gating invariants). Always run before
+  declaring a change done.
 - `node server.mjs` directly to serve without rebuilding.
 - `npm run debug` — build, then serve so the audio harness at
   `/debug/audio-debug.html` works.
@@ -70,7 +72,11 @@ from the local `dist/` (that folder is gitignored). CI owns it:
 - `src/synth/shared.ts` — shared post-string chain: voice bus → body peaking EQ →
   dry + damped feedback-delay room → master gain → compressor.
 - `src/main.ts` — UI wiring, form handling, guitar/piano orchestration (entry point).
-- `scripts/smoke.mjs` — Node checks of the compiled output.
+- `scripts/smoke.mjs` — Node checks of the compiled theory/fingering output.
+- `scripts/audio-sched.mjs` — Node checks of the compiled audio *scheduling* graph
+  (stubbed Web Audio): every voice must be silent from t=0 until its strum slot,
+  the strum must spread over time, and each voice must have a distinct
+  brightness/attack/role. This is the regression test for the "one sound" bug below.
 - `server.mjs` — zero-dep Node HTTP static file server (root = cwd).
 
 Runtime dependencies: **none**. TypeScript is the only devDependency. No frameworks.
@@ -190,8 +196,19 @@ Runtime dependencies: **none**. TypeScript is the only devDependency. No framewo
   user-configurable from the UI: the "Strum speed (ms)" input in the guitar
   block writes `DEFAULT_CONFIG.strum.guitarMs` live (0 = all strings at once),
   so audio settings need no code change to A/B.
-- Note: Web Audio can't run under Node, so the smoke suite exercises no audio —
-  sound changes are verified by ear in the browser.
+- **GOTCHA (the real "one sound" bug)**: an `AudioWorkletNode` starts sounding the
+  instant it is connected, and a `GainNode`'s `AudioParam` defaults to **1.0**.
+  `startVoice` must therefore hold its volume gate silent *from time 0*
+  (`g.gain.setValueAtTime(0.0001, 0)`) before the exponential ramp at the voice's
+  strum slot — otherwise every voice leaks immediately and the strum collapses.
+  `scripts/audio-sched.mjs` guards this.
+- Note: Web Audio can't run under Node, so the smoke suite exercises no *audio* —
+  but `scripts/audio-sched.mjs` stubs the Web Audio API to test the host-side
+  voice graph, and sound changes are verified by ear in the browser. For deep
+  debugging you can render the real graph offline: install `node-web-audio-api`
+  in a temp dir, alias `globalThis.AudioContext` to an `OfflineAudioContext`
+  subclass, import `dist/audio.js`, call `playVoicing`, then `startRendering()`
+  and analyse/write a WAV. (This is how the leak above was found.)
 
 ## Conventions & gotchas
 
@@ -257,15 +274,22 @@ spectral peaks of the ring. `src/audio.ts` exposes `debugTap()` (pre-comp
    open C: brightness 0.38→1.00, damping 0.80→0.19, att 11→2 ms, eq
    LP1000/PK180 → PK3600. The strum speed also became a top-level UI input
    ("Strum speed (ms)", 0 = all at once) writing `cfg.strum.guitarMs` live.
+9. **THE actual root cause of "one sound": the leaked volume gate.** An offline
+   render (see the note in the Audio section) showed the rendered open C was at
+   full level from sample 0 with *zero* onsets, even though the voice log
+   scheduled 6 voices 0–613 ms apart. `startVoice` only called
+   `g.gain.setValueAtTime(0.0001, start)`; a `GainNode`'s AudioParam defaults to
+   **1.0**, and a worklet sounds the moment it's connected, so every voice
+   leaked at full volume immediately and the strum collapsed — the timing was
+   never wrong, it just wasn't audible. Fix: hold silence from time 0
+   (`setValueAtTime(0.0001, 0)`) before the ramp at each slot. Envelope now
+   starts at 0 and builds in steps (0→0.017→0.059→0.076→0.096). Guarded forever
+   by `scripts/audio-sched.mjs` (verified it fails without the fix).
 
-Verified multi-string behaviour: headless run of the harness schedules 6 voices
-at ~120 ms steps, treble-first, pan sweeping left→right, and the sustain
-spectrum shows the full chord (C: E2/C3/G3/E3/C4/E4 all present) at healthy
-level after ~1.4 s. Since the systematic `voices`/`roles` rewrite the per-string
-parameters are fully deterministic (see entry 7); any remaining "still sounds
-fused" complaint is a *perceptual* timing/timbre question — turn `strum.*`,
-`voices[]`, `roles.*`, `panning.spread`, `string.sustain`, `string.damping` in
-`DEFAULT_CONFIG`, then re-check with the harness.
+Verified: the offline-rendered open C now starts silent and rises in steps over
+~650 ms (onsets detected at 60/140/260 ms, more as it builds), with each string
+carrying its own EQ/attack/brightness. The lesson is that the voice log alone
+can lie — a real render/measurement is the ground truth for anything about sound.
 
 ## Dev branches & the frozen public site
 

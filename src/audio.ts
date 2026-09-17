@@ -150,7 +150,12 @@ function startVoice(freq: number, t: number, p: VoiceParams, cfg: PluckAudioConf
 
   // Fade in over a few ms so the noise burst can't click; `peak` sets volume.
   // `attackMs` varies per string: bass strings thump in slow, treble snaps fast.
+  // CRITICAL: a GainNode's AudioParam starts at 1.0, and an AudioWorkletNode
+  // sounds the moment it is connected — so without zeroing the gain from the
+  // very start, every voice leaks at full volume immediately and the whole
+  // strum collapses into one simultaneous pluck. Hold silence until `start`.
   const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, 0);
   g.gain.setValueAtTime(0.0001, start);
   g.gain.exponentialRampToValueAtTime(Math.max(0.02, p.peak), start + Math.max(0.0002, p.attackMs / 1000));
   tail.connect(g);

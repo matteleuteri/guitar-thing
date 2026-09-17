@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc",
     "start": "npm run build && node server.mjs",
-    "test": "npm run build && node scripts/smoke.mjs",
+    "test": "npm run build && node scripts/smoke.mjs && node scripts/audio-sched.mjs",
     "debug": "npm run build && node server.mjs"
   },
   "devDependencies": {
