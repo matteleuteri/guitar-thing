@@ -65,35 +65,56 @@ function humanize(freq: number, cfg: PluckAudioConfig): { freq: number; jitter: 
   };
 }
 
-/** One plucked string at `t`. `scoopCents` varies per note; `pan` is -1..1. */
-function startVoice(
-  freq: number,
-  t: number,
-  scoopCents: number,
-  peak: number,
-  cfg: PluckAudioConfig,
-  pan: number,
-): void {
+/**
+ * Per-note sound parameters, fully resolved before the note is scheduled.
+ * `playVoicing` builds these from the systematic string `voices` + `roles`
+ * tables; `playNotes` uses the piano path (plain random profile).
+ */
+interface VoiceParams {
+  scoopCents: number;
+  peak: number;
+  /** Noise-burst loudness (0..1). */
+  brightness: number;
+  /** Loop lowpass (0..1). */
+  damping: number;
+  /** Loop gain per sample (0..1). */
+  sustain: number;
+  /** Pick-scrape transient level (0..1). */
+  pick: number;
+  /** Stereo pan -1..1. */
+  pan: number;
+  /** "root" when the note is the chord's root pitch class, else "color". */
+  role: "root" | "color";
+}
+
+/** One plucked string at `t`. */
+function startVoice(freq: number, t: number, p: VoiceParams, cfg: PluckAudioConfig): void {
   if (!ctx || !graph) return;
   const { freq: hz, jitter } = humanize(freq, cfg);
   const start = t + jitter;
-  recordDebugEvent({ kind: "voice", t: start, freq: hz, peak, pan });
-
-  // Per-note timbre spreads so not every string uses one identical sound.
-  const brightness = clamp01(cfg.string.brightness + (Math.random() * 2 - 1) * cfg.variation.brightnessSpread);
-  const damping = clamp01(cfg.string.damping + (Math.random() * 2 - 1) * cfg.variation.dampingSpread);
-  const sustain = clamp01(cfg.string.sustain + (Math.random() * 2 - 1) * cfg.variation.sustainSpread);
+  recordDebugEvent({
+    kind: "voice",
+    t: start,
+    freq: hz,
+    peak: p.peak,
+    pan: p.pan,
+    role: p.role,
+    brightness: p.brightness,
+    damping: p.damping,
+    sustain: p.sustain,
+    pick: p.pick,
+  });
 
   const node = new AudioWorkletNode(ctx, "pluck-string", {
     processorOptions: {
       freq: hz,
-      sustain,
-      brightness,
-      damping,
+      sustain: p.sustain,
+      brightness: p.brightness,
+      damping: p.damping,
       excitationMs: cfg.string.excitationMs,
-      pickLevel: cfg.attack.pickLevel,
+      pickLevel: p.pick,
       pickMs: cfg.attack.pickMs,
-      scoopCents,
+      scoopCents: p.scoopCents,
       scoopMs: cfg.scoop.ms,
       ringFrames: Math.floor(ctx.sampleRate * ringSeconds(hz, cfg)),
     },
@@ -102,11 +123,11 @@ function startVoice(
   // Fade in over a few ms so the noise burst can't click; `peak` sets volume.
   const g = ctx.createGain();
   g.gain.setValueAtTime(0.0001, start);
-  g.gain.exponentialRampToValueAtTime(Math.max(0.02, peak), start + 0.004);
+  g.gain.exponentialRampToValueAtTime(Math.max(0.02, p.peak), start + 0.004);
   node.connect(g);
   // Pan spreads the strings across the stereo field (0 = center, e.g. piano).
   const panner = ctx.createStereoPanner();
-  panner.pan.value = pan;
+  panner.pan.value = p.pan;
   g.connect(panner);
   panner.connect(graph.voiceIn);
 
@@ -146,19 +167,39 @@ export function playVoicing(frets: (number | null)[], tuning: number[]): void {
     const gap = cfg.strum.guitarMs / 1000;
     const jitter = cfg.strum.jitterMs / 1000;
     const count = strings.length;
-    for (const { fret, s } of strings) {
-      const freq = midiToFreq(tuning[s]! + fret!);
-      // Downstroke: the treble strings sound first and the thick low string
-      // last, one at a time like a hand moving across the fretboard.
-      const off = (count - 1 - s) * gap + (Math.random() * 2 - 1) * jitter;
-      // Low, thick strings get the attack bend; the rest strike clean.
-      const scoop = s <= 1 ? cfg.scoop.cents : 0;
-      const peak = cfg.micro.peak * (s === 0 ? cfg.balance.bassBoost : 1) * (count / 6) ** 0.5 + 0.06;
+    if (count === 0) return;
+    // The chord's root is its lowest sounding pitch class, so `roles` accent
+    // the same voice every time the same chord is played (no wiring needed).
+    const rootPc = Math.min(...strings.map((x) => (tuning[x.s]! + x.fret!) % 12));
+    // Downstroke: treble strings first, thick low string last, like a hand.
+    const ordered = [...strings].sort((a, b) => b.s - a.s);
+    for (let k = 0; k < ordered.length; k++) {
+      const { fret, s } = ordered[k]!;
+      const midi = tuning[s]! + fret!;
+      const pc = midi % 12;
+      const isRoot = pc === rootPc;
+      const v = cfg.voices[s] ?? cfg.voices[0]!;
+      const r = cfg.roles;
+      const role: "root" | "color" = isRoot ? "root" : "color";
+      // Hand-shaped spacing: burst out on treble, bloom into the bass.
+      let pat = 0;
+      for (let j = 0; j < k; j++) pat += cfg.strum.pattern[j] ?? 1;
+      const off = gap * pat + (Math.random() * 2 - 1) * jitter;
       // A hand doesn't hit every string at the same force.
       const vel = 1 + (Math.random() * 2 - 1) * cfg.variation.velocitySpread;
+      const peak =
+        (cfg.micro.peak * (isRoot ? r.rootVel : r.colorVel) * (s === 0 ? cfg.balance.bassBoost : 1) * (count / 6) ** 0.5 + 0.06) *
+        vel;
       // Bass strings go left, treble right, so voices separate in the stereo field.
       const pan = count > 1 ? ((s / (count - 1)) * 2 - 1) * cfg.panning.spread : 0;
-      startVoice(freq, base + Math.max(0, off), scoop, peak * vel, cfg, pan);
+      // Systematic identity: the string's fixed character, accented by its role,
+      // with only a thin random sliver left over for humanity.
+      const brightness = clamp01(v.brightness * (isRoot ? r.rootBright : r.colorBright) + (Math.random() * 2 - 1) * cfg.variation.brightnessSpread);
+      const damping = clamp01(v.damping * (isRoot ? r.rootDamp : r.colorDamp) + (Math.random() * 2 - 1) * cfg.variation.dampingSpread);
+      const sustain = clamp01(v.sustain + (isRoot ? r.rootSustainAdd : r.colorSustainAdd) + (Math.random() * 2 - 1) * cfg.variation.sustainSpread);
+      const pick = clamp01(v.pick * (isRoot ? r.rootPick : r.colorPick));
+      const scoop = v.scoopCents;
+      startVoice(midiToFreq(midi), base + Math.max(0, off), { scoopCents: scoop, peak, brightness, damping, sustain, pick, pan, role }, cfg);
     }
   });
 }
@@ -172,9 +213,23 @@ export function playNotes(midis: number[]): void {
     const base = ctx!.currentTime + NOTE_START;
     const roll = cfg.strum.pianoMs / 1000;
     for (let i = 0; i < midis.length; i++) {
-      const freq = midiToFreq(midis[i]!);
       const peak = (cfg.micro.peak * (i === 0 ? 1.3 : 1) * (midis.length / 6) ** 0.5 + 0.06) * 0.9;
-      startVoice(freq, base + i * roll, 0, peak, cfg, 0);
+      const spread = cfg.variation;
+      startVoice(
+        midiToFreq(midis[i]!),
+        base + i * roll,
+        {
+          scoopCents: 0,
+          peak,
+          brightness: clamp01(cfg.string.brightness + (Math.random() * 2 - 1) * spread.brightnessSpread),
+          damping: clamp01(cfg.string.damping + (Math.random() * 2 - 1) * spread.dampingSpread),
+          sustain: clamp01(cfg.string.sustain + (Math.random() * 2 - 1) * spread.sustainSpread),
+          pick: cfg.attack.pickLevel,
+          pan: 0,
+          role: "color",
+        },
+        cfg,
+      );
     }
   });
 }
@@ -199,6 +254,16 @@ export interface AudioDebugEvent {
   peak: number;
   /** Stereo pan -1..1. */
   pan: number;
+  /** "root" when the note is the chord's root pitch class, else "color". */
+  role: "root" | "color";
+  /** Noise-burst loudness of this voice (0..1). */
+  brightness: number;
+  /** Loop lowpass of this voice (0..1). */
+  damping: number;
+  /** Loop gain of this voice (0..1). */
+  sustain: number;
+  /** Pick-scrape level of this voice (0..1). */
+  pick: number;
 }
 
 /** Ring buffer of the most recent scheduled voices. Zero-cost unless read. */

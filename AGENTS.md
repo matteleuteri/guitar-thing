@@ -154,22 +154,33 @@ Runtime dependencies: **none**. TypeScript is the only devDependency. No framewo
 - Voices share one graph (`shared.ts`): voice bus → body peaking EQ (low +
   presence) → dry path *and* room tail (feedback delay, dampened lowpass) →
   master gain → compressor → destination.
-- Voice separation is deliberate: a guitar voicing strums **top string first**
-  (treble → bass, like a downstroke), `strum.guitarMs` apart (default 70 ms)
-  plus a random ±`strum.jitterMs` so it doesn't sound metronomic; piano keys
-  roll every `strum.pianoMs` (8 ms). Each note gets a random
-  ±brightness/±sustain/±damping and ±velocity (`variation.*`) and a stereo
-  position sweeping bass-string-left → treble-string-right (`panning.spread`).
-  Without this a chord fuses into a single pluck — the transients are identical
-  and the rolls were too tight.
+- Voice separation is deliberate and **systematic**, not random. Each guitar
+  string has a fixed character in `voices[]` (index 0 = lowest/thickest): wound
+  lows are dark (`damping` high), heavy (low `pick`), and scoop the attack;
+  plain highs are glassy/bright (`brightness` → 1.0, `damping` low) with a
+  scrappy pick. On top, `roles.*` accents the root pitch class (root =
+  lowest sounding pc, derived inside `playVoicing` — no wiring needed): roots
+  are louder, slightly darker, lighter-picked, and ring a touch longer
+  (`rootSustainAdd`/`colorSustainAdd` are near-1 additions, not multipliers);
+  color tones get a brightness/pick lift so intervals articulate. Only a thin
+  random sliver (`variation.*`, deliberately small now) humanizes on top.
+- A guitar voicing strums **top string first** (treble → bass, like a
+  downstroke) using `strum.pattern` (index = hit position, treble-first):
+  the k-th hit starts `guitarMs * sum(pattern[0..k-1])` in, so the treble
+  bursts out and a final wide gap "blooms" into the bass string
+  (`pattern` default `[0.9, 0.8, 0.8, 0.9, 1.1, 1.4]`), plus random ±
+  `strum.jitterMs`; piano keys roll every `strum.pianoMs` (8 ms). Stereo
+  sweeps bass-left → treble-right (`panning.spread`). Without all this a chord
+  fuses into a single pluck — identical transients collapse into one sound.
 - String "ring" is controlled by two knobs: `string.sustain` (per-sample loop
   gain — a guitar-like long ring needs ~0.9998+, NOT ~0.99 which collapses in
   ~100 ms) and `string.damping` (loop lowpass, 0 = bright/long harmonics,
   1 = dull/short). Raising sustain + brightening damping is what stopped chords
   from reading as one percussive blip.
 - Humanization (`startVoice`): random detune (`detuneCents`), start jitter
-  (`jitterMs`), and a per-string peak that boosts the bass string. The low two
-  strings get an attack pitch scoop; piano notes (`playNotes`) strike clean.
+  (`jitterMs`), and a per-string peak that boosts the bass string. Attack scoops
+  come from each string's `voices[s].scoopCents` (the thick two get one); piano
+  notes (`playNotes`) strike clean through a plain random profile.
 - `stopAudio()` posts a `stop` message to every live worklet node and
   disconnects it (simpler than the old oscillator teardown).
 - All knobs live in `src/synth/config.ts` (`DEFAULT_CONFIG`); the documented
@@ -220,16 +231,29 @@ Timeline of the audio work (the "still sounds like one string" saga):
    post-strum RMS envelope, (b) the exact scheduled voice log from
    `getAudioDebugEvents()` (proving *how many* voices launched and when — this
    is the ground truth for "is it one string or not"), and (c) the strongest
-   spectral peaks of the ring. `src/audio.ts` exposes `debugTap()` (pre-comp
-   master tap) and `getAudioDebugEvents()`; both are tiny, no-op-until-called,
-   and are intentionally permanent.
+spectral peaks of the ring. `src/audio.ts` exposes `debugTap()` (pre-comp
+    master tap) and `getAudioDebugEvents()`; both are tiny, no-op-until-called,
+    and are intentionally permanent. The voice log now shows each note's
+    `role` + `brightness/damping/sustain/pick` so systematic per-string identity
+    is provable at a glance.
+7. **Per-string identity + roles (the "smarter per-note sound")** — replaced the
+   flat random timbre with `voices[]` (6 fixed string characters: wound/dark
+   lows → plain/bright highs, per-string pick + scoop), `roles.*` (root pitch
+   class louder/darker/longer, color tones brighter/more articulate), and a
+   hand-shaped `strum.pattern` (`[0.9, 0.8, 0.8, 0.9, 1.1, 1.4]`: treble bursts
+   out, wide final gap blooms into the bass). Random `variation.*` shrunk to a
+   thin sliver so the systematic structure dominates. All values verified
+   deterministically for open C: brightness 0.43→1.00, damping 0.78→0.19,
+   root Cs ring longest, strum 0/108/204/300/408/540 ms. Direction was agreed
+   with the user first (String + role + strum, pronounced separation).
 
 Verified multi-string behaviour: headless run of the harness schedules 6 voices
 at ~120 ms steps, treble-first, pan sweeping left→right, and the sustain
 spectrum shows the full chord (C: E2/C3/G3/E3/C4/E4 all present) at healthy
-level after ~1.4 s. Remaining "still sounds fused" complaints are a *perceptual*
-timing/timbre question — turn `strum.guitarMs`, `strum.jitterMs`,
-`variation.*`, `panning.spread`, `string.sustain`, `string.damping` in
+level after ~1.4 s. Since the systematic `voices`/`roles` rewrite the per-string
+parameters are fully deterministic (see entry 7); any remaining "still sounds
+fused" complaint is a *perceptual* timing/timbre question — turn `strum.*`,
+`voices[]`, `roles.*`, `panning.spread`, `string.sustain`, `string.damping` in
 `DEFAULT_CONFIG`, then re-check with the harness.
 
 ## Dev branches & the frozen public site
@@ -245,12 +269,13 @@ Policy:
   `localhost:5173`; `npm test` as the gate. Audio experiments are tuned via
   `DEFAULT_CONFIG`, verified with the `/debug/audio-debug.html` harness.
 
-## Backlog / ideas (told to hold, discuss later)
+## Backlog / ideas (discuss with the user before building)
 
-- **Smarter per-note sound inside a chord.** Today every string gets the same
-  K-S voice with only random variation. Idea: make each note's timbre/attack/
-  volume/spacing *voicing-aware* instead of matching random spread — e.g. root
-  vs third vs seventh roles, low vs high register, string order in the strum,
-  and possibly chord-quality-specific behaviour. Goal: chords read as distinct
-  notes (the user still perceives strings as "one sound"). Do not build this
-  without an explicit discussion of the direction first.
+- ~~**Smarter per-note sound inside a chord.**~~ **Done** — see progress entry 7:
+  `voices[]` per-string character + `roles.*` (root vs color) + hand-shaped
+  `strum.pattern`, agreed as "String + role + strum, pronounced separation"
+  (commit landed on `dev-audio`; never pushed to the live `main`).
+- **Chord-quality-specific behaviour** — the next level beyond roles: make the
+  *quality* itself shape voicing (maj7 sparkly, minor dark, sus ambiguous,
+  dim tense...). Not started — would be `roles` growing a quality axis. Build
+  only after the user signs off on the current sound by ear.
