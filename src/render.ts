@@ -145,7 +145,7 @@ function keyboardEl(
     }
     wkey.appendChild(el("span", `${baseClass}-mark`, nameOf(pc)));
     wkey.title = midiName(m);
-    wkey.addEventListener("click", () => playNotes([m]));
+    wkey.addEventListener("click", () => playNotes([m], true));
     wrow.appendChild(wkey);
   }
   box.appendChild(wrow);
@@ -162,7 +162,7 @@ function keyboardEl(
     bkey.style.left = `${(leftCount / wc) * 100}%`;
     bkey.style.width = `${(0.62 / wc) * 100}%`;
     bkey.title = midiName(m);
-    bkey.addEventListener("click", () => playNotes([m]));
+    bkey.addEventListener("click", () => playNotes([m], true));
     bkey.appendChild(el("span", `${baseClass}-mark`, nameOf(pc)));
     wrow.appendChild(bkey);
   }
@@ -199,7 +199,7 @@ export function renderPianoVoicing(
   play.title = "Play voicing";
   play.addEventListener("click", (e) => {
     e.stopPropagation();
-    playNotes(keys);
+    playNotes(keys, true);
   });
   box.appendChild(play);
   return box;

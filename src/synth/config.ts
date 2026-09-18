@@ -2,11 +2,18 @@
  * One place to tune the synthesized sound. Adjust the numbers here to taste;
  * every knob maps to a named section of the audio pipeline:
  *
- * - `string`    the Karplus–Strong string model itself (loop damping/excitation).
+ * - `string`    fallback string model knobs used by notes that don't declare
+ *               their own identity (single fretboard dots) — sustain/brightness/
+ *               damping of the K–S loop.
  * - `voices`    fixed per-string identity (wound/dark lows → thin/bright highs)
  *               — each string gets its own pickup-style EQ, attack envelope,
- *               brightness/damping/sustain/scoop/pick. The core of "each string
- *               makes its own sound".
+ *               brightness/damping/decay/sustain/scoop/pick, a `pickPos` where
+ *               the pick strikes (commuted-synthesis pluck seed), and its own
+ *               scrape transient (`pickBright`/`pickDecayMs`). The core of
+ *               "each string makes its own sound".
+ * - `piano`     the guitar `voices` idea for keys: a note's identity comes from
+ *               its register (dark thumpy bass → bright snappy treble), so the
+ *               notes of a piano voicing ring apart instead of fusing.
  * - `roles`     persistent accents for the root pitch class vs the color tones.
  * - `attack`    the "pick scrape" highpassed noise transient on note start.
  * - `micro`     random humanization (detune + start-time jitter, base loudness).
@@ -25,34 +32,56 @@ export interface PluckAudioConfig {
   string: {
     /** Loop gain (0..1). Higher = longer sustain per note. */
     sustain: number;
-    /** Loudness of the noise burst that "plucks" the string (0..1). */
+    /** Excitation loudness (0..1): amplitude of the seeded pluck. */
     brightness: number;
     /** Loop lowpass (0 = bright/long harmonics, 1 = dull/short). */
     damping: number;
-    /** Length of that noise burst in ms. */
-    excitationMs: number;
   };
   /**
    * Fixed character per guitar string, index 0 = thickest/lowest. These are the
    * *systematic* differences (wound lows vs plain highs) that let the ear pick
    * voices apart; random `variation` only adds a thin humanizing sliver on top.
    * Each string is a full "pickup voicing": tone EQ (like a pickup position),
-   * attack envelope (bass thumps, treble snaps), noise brightness, loop damping,
-   * sustain, scoop and pick character.
+   * attack envelope (bass thumps, treble snaps), excitation loudness, loop
+   * damping, sustain, scoop and pick character.
    */
   voices: {
-    /** Noise-burst loudness (0..1): higher = stringier/brighter articulation. */
+    /** Excitation loudness (0..1): amplitude of the seeded pluck (how hard the
+     *  string is hit). Higher = stronger, stringier articulation. */
     brightness: number;
     /** Loop lowpass (0..1): 1 = dull/wound, 0 = bright/glass. */
     damping: number;
+    /** Second one-pole loop loss (0..1): steepens the tail so high partials
+     *  burn off along a string-like curve. Wound lows darken fast; plain highs
+     *  keep a sparkly tail. Independent of `damping` (which sets the sustained
+     *  brightness). */
+    decay: number;
     /** Loop gain per sample (0..1): higher = longer ring. */
     sustain: number;
     /** Pitch scoop at the attack for this string (cents); 0 = strike clean. */
     scoopCents: number;
     /** Pick-scrape transient level for this string (0..1). */
     pick: number;
+    /**
+     * Brightness of this string's scrape transient (0..1 → highpass cutoff
+     * ~350 Hz..9 kHz). Wound lows scrape dark and plosive (near the nut);
+     * plain highs scrape bright and thin (near the bridge). This is what
+     * separates the onsets from the very first sample, before the body EQ.
+     */
+    pickBright: number;
+    /** Length of this string's scrape transient in ms (lows linger, highs snap). */
+    pickDecayMs: number;
     /** Host-side gain ramp time in ms: slow = bass thump, fast = treble snap. */
     attackMs: number;
+    /**
+     * Where along the string the pick strikes (0..1, fraction from the bridge).
+     * Seeds the K–S loop with a triangular displacement whose kink is at this
+     * point, so the string excites harmonics `sin(n·π·pickPos)/n²` — small =
+     * near-bridge/bright, large = near-nut/fat. Each string being plucked at a
+     * different spot is a big part of real guitars (and makes voices distinct
+     * by construction, not just by post-EQ).
+     */
+    pickPos: number;
     /** Optional tone-shape EQ applied to this string only (pickup voicing). */
     eq?: {
       /** Low shelf cut for wound strings (Hz); darkens without killing lows. */
@@ -65,6 +94,19 @@ export interface PluckAudioConfig {
       peakQ?: number;
     };
   }[];
+  /**
+   * A piano note's fixed character comes from where it sits on the keyboard —
+   * the piano analogue of the guitar's per-string `voices`. `startVoice`
+   * interpolates every knob between the `low` and `high` profiles by MIDI note,
+   * so a voicing's bass is dark/thumpy/long and its treble bright/snappy while
+   * every key keeps its own identity.
+   */
+  piano: {
+    /** Character of a deep bass note (anchor MIDI = `low.midi`). */
+    low: PianoRegisterProfile;
+    /** Character of a bright treble note (anchor MIDI = `high.midi`). */
+    high: PianoRegisterProfile;
+  };
   /** Role accents: the root pitch class vs the color tones. */
   roles: {
     /** Velocity multiplier for root-class notes (anchor the harmony). */
@@ -91,7 +133,9 @@ export interface PluckAudioConfig {
   attack: {
     /** Loudness of the extra highpassed pick-scrape transient (0..1). 0 = off. */
     pickLevel: number;
-    /** Length of the scrape transient in ms. */
+    /** Brightness of the scrape when the string doesn't set its own (0..1). */
+    pickBright: number;
+    /** Length of the scrape transient in ms (default for unpicked voices). */
     pickMs: number;
   };
   scoop: {
@@ -168,77 +212,157 @@ export interface PluckAudioConfig {
   };
 }
 
+/**
+ * One endpoint of the piano register interpolation: the full per-note character
+ * (same knobs as a guitar `voices` entry, holding their own meaning for a key).
+ */
+export interface PianoRegisterProfile {
+  /** MIDI note this profile anchors; keys beyond it clamp to it. */
+  midi: number;
+  /** Excitation loudness (0..1): amplitude of the seeded pluck (0..1). */
+  brightness: number;
+  /** Loop lowpass (0..1): 1 = dull, 0 = bright. */
+  damping: number;
+  /** Loop gain per sample (0..1): higher = longer ring. */
+  sustain: number;
+  /** Attack scoop in cents (bass grazes sharp, treble strikes clean). */
+  scoopCents: number;
+  /** Pick-scrape transient level (0..1). */
+  pick: number;
+  /** Host-side gain ramp in ms: lows thump, highs snap. */
+  attackMs: number;
+  /** Register tone EQ (a grand's low-mid warmth vs high sparkle). */
+  eq?: {
+    lowpassHz?: number;
+    peakHz?: number;
+    peakGainDb?: number;
+    peakQ?: number;
+  };
+}
+
 export const DEFAULT_CONFIG: PluckAudioConfig = {
   string: {
     /** Loop gain (0..1), per sample. Guitar-like long ring needs ~0.9998+. */
     sustain: 0.99985,
     brightness: 0.85,
     damping: 0.32,
-    excitationMs: 8,
   },
   voices: [
     // Low E (wound): dark body, slow thump, long ring, big attack scoop.
-    // Bright lows are shelved low and a warm 180 Hz peak gives it a neck-pickup thud.
+    // Plucked far toward the nut (0.75) so its harmonic set is fat; the heavy
+    // decay (0.5) lets the wound string's highs burn off fast.
     {
       brightness: 0.34,
       damping: 0.82,
+      decay: 0.5,
       sustain: 0.99993,
       scoopCents: 28,
       pick: 0.12,
+      pickBright: 0.18,
+      pickDecayMs: 4.5,
       attackMs: 11,
+      pickPos: 0.75,
       eq: { lowpassHz: 1000, peakHz: 180, peakGainDb: 9, peakQ: 1.4 },
     },
     // A (wound): still dark/thumpy, slightly less so.
     {
       brightness: 0.48,
       damping: 0.7,
+      decay: 0.45,
       sustain: 0.99989,
       scoopCents: 20,
       pick: 0.16,
+      pickBright: 0.28,
+      pickDecayMs: 4.0,
       attackMs: 9,
+      pickPos: 0.7,
       eq: { lowpassHz: 1250, peakHz: 200, peakGainDb: 7, peakQ: 1.2 },
     },
     // D (wound): the start of the "plain" mid range; clearer body, no scoop.
     {
       brightness: 0.64,
       damping: 0.56,
+      decay: 0.4,
       sustain: 0.99986,
       scoopCents: 2,
       pick: 0.22,
+      pickBright: 0.45,
+      pickDecayMs: 3.2,
       attackMs: 6,
+      pickPos: 0.6,
       eq: { lowpassHz: 1800, peakHz: 260, peakGainDb: 5, peakQ: 1 },
     },
     // G (plain): snappy, warm presence around the guitar's mid "honk".
     {
       brightness: 0.82,
       damping: 0.4,
+      decay: 0.28,
       sustain: 0.99983,
       scoopCents: 0,
       pick: 0.3,
+      pickBright: 0.6,
+      pickDecayMs: 2.6,
       attackMs: 4,
+      pickPos: 0.45,
       eq: { peakHz: 700, peakGainDb: 4, peakQ: 1.2 },
     },
     // B (plain): bright and quick, presence up around 1.8 kHz.
     {
       brightness: 0.94,
       damping: 0.3,
+      decay: 0.22,
       sustain: 0.99981,
       scoopCents: 0,
       pick: 0.4,
+      pickBright: 0.8,
+      pickDecayMs: 2.0,
       attackMs: 3,
+      pickPos: 0.35,
       eq: { peakHz: 1800, peakGainDb: 6, peakQ: 1 },
     },
-    // High E (plain): thin, glassy, aggressive scrape; presence 3.6 kHz.
+    // High E (plain): thin, glassy, aggressive scrape; presence 3.6 kHz,
+    // minimal extra decay so the tail stays sparkly.
     {
       brightness: 1.0,
       damping: 0.22,
+      decay: 0.18,
       sustain: 0.99979,
       scoopCents: 0,
       pick: 0.5,
+      pickBright: 0.95,
+      pickDecayMs: 1.5,
       attackMs: 2,
+      pickPos: 0.3,
       eq: { peakHz: 3600, peakGainDb: 8, peakQ: 0.9 },
     },
   ],
+  // Piano "strings": the register itself is the identity. Bass keys are dark,
+  // felted, damped and long; treble keys bright, snappy and short. Everything
+  // between them is interpolated by MIDI note, so no two keys share a profile.
+  piano: {
+    // C2: dark, warm low-mid body, slow-ish hammer, long ring, slight scoop.
+    low: {
+      midi: 36,
+      brightness: 0.5,
+      damping: 0.68,
+      sustain: 0.99992,
+      scoopCents: 12,
+      pick: 0.18,
+      attackMs: 8,
+      eq: { lowpassHz: 1100, peakHz: 220, peakGainDb: 6, peakQ: 1.2 },
+    },
+    // C7: thin and glassy, fast hammer, shorter ring, bright presence.
+    high: {
+      midi: 96,
+      brightness: 1.0,
+      damping: 0.18,
+      sustain: 0.99978,
+      scoopCents: 0,
+      pick: 0.55,
+      attackMs: 2,
+      eq: { lowpassHz: 14000, peakHz: 3200, peakGainDb: 8, peakQ: 0.9 },
+    },
+  },
   roles: {
     rootVel: 1.18,
     colorVel: 1.0,
@@ -253,6 +377,7 @@ export const DEFAULT_CONFIG: PluckAudioConfig = {
   },
   attack: {
     pickLevel: 0.35,
+    pickBright: 0.6,
     pickMs: 6,
   },
   scoop: {

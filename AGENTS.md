@@ -18,6 +18,21 @@ A dependency-free browser app ("Note/Chord Finder") with two instrument modes:
    (default 12, an octave reach with two hands = up to 10 keys).
 4. Lets you play each voicing via Web Audio pluck synthesis.
 
+## Current status (break point — read first)
+
+All in-progress audio work lives on the `dev-audio` branch; the live Pages
+site (`main`) is frozen as-is. **The user approved this sound:** physical
+string core (commuted triangle pluck at per-string `pickPos` → fractional-delay
+allpass → two-stage damping/`decay`) plus per-string scrape shape (`pickBright`
+/`pickDecayMs`) that separates onsets from the first sample. Those two slices
+(Leads A + C-1) are done and sounded good. **Parked after user listening:**
+piano register identity (commit on this branch, still reads as "one sound"),
+and the *synthesized* convolutional body IR, which beat/wobbled badly by ear
+twice and was reverted (a body is only worth retrying as a *recorded* IR).
+**Backlog (discuss before building):** the rest of Lead C (pitched pre-ring
+"slap", attack bloom), Lead D (spatialization), Lead E (offline render vs a
+real recording to measure instead of guess), and the muted-string "thunk".
+
 ## Commands
 
 - `npm run build` — compile TS (`src/` → `dist/` via `tsc`, tsconfig at repo root).
@@ -145,27 +160,36 @@ Runtime dependencies: **none**. TypeScript is the only devDependency. No framewo
   with `calc(...)`, keeping the piano ratio; keyboards are capped-width + centered
   (`margin: 0 auto`) so keys don't stretch wide. Black keys render as children of the
   white-key row so their `left: (leftCount / whiteCount * 100)%` stays exact.
-- Click-to-play: every keyboard key (`playNotes([midi])`) and every fretboard
-  position dot (`playNotes([tuning[s] + f])`) plays its own note on click; voicing
-  mini-keyboards are key-playable too, alongside their ▶ whole-voicing button.
+- Click-to-play: every keyboard key (`playNotes([midi], true)`) and every
+  fretboard position dot (`playNotes([tuning[s] + f])`) plays its own note on
+  click; voicing mini-keyboards are key-playable too, alongside their ▶
+  whole-voicing button.
 
 ## Audio
 
 - `audio.ts` is asynchronous internally: `playVoicing`/`playNotes` are called
   from click handlers but each schedules onto a promise chain so the first click
   can await the `AudioWorklet` module load (first sound may lag one click).
-- Every note is a `pluck-string` worklet node (Karplus–Strong: excitation noise
-  into a damped self-resonating delay line tuned to `1/freq`). The processor
+- Every note is a `pluck-string` worklet node (Karplus–Strong: the loop's
+  buffer is seeded with a *physical* pluck — one period of the string's
+  triangular displacement with its kink at `pickPos`, harmonics
+  `sin(n·π·pickPos)/n²` — then self-resonates through a fractional-delay
+  allpass and a damped delay line tuned to `1/freq`). The processor
   self-stops after `ringFrames`; `audio.ts` frees each node via a timer.
 - Voices share one graph (`shared.ts`): voice bus → body peaking EQ (low +
   presence) → dry path *and* room tail (feedback delay, dampened lowpass) →
   master gain → compressor → destination.
 - Voice separation is deliberate and **systematic**, not random. Each guitar
   string has a fixed identity in `voices[]` (index 0 = lowest/thickest) — not
-  just brightness, but a full per-string profile: pickup-style EQ (`eq`:
-  dark lowpass + warm body peak on wound strings, rising presence peaks on the
-  plains), an attack envelope (`attackMs`: bass strings thump in slow, treble
-  snaps fast), plus `pick` scrape, `scoopCents`, sustain and damping. On top,
+  just brightness, but a full per-string profile: a commuted-pluck `pickPos`
+  (0.75→0.3, near-nut fat → near-bridge bright) that seeds the string's
+  harmonics by construction, pickup-style EQ (`eq`: dark lowpass + warm body
+  peak on wound strings, rising presence peaks on the plains), a two-stage
+  tail (`damping` sustained brightness + `decay` 0.50→0.18 that burns wound
+  highs off fast), an attack envelope (`attackMs`: bass thumps in slow, treble
+  snaps fast), and a scrape transient with its own color and length
+  (`pick` level, `pickBright` highpass ~350 Hz..9 kHz, `pickDecayMs`
+  4.5→1.5 ms lows→highs) so onsets separate from sample one. On top,
   `roles.*` accents the root pitch class (root = lowest sounding pc, derived
   inside `playVoicing` — no wiring needed): roots are louder, slightly darker,
   lighter-picked, and ring a touch longer (`rootSustainAdd`/`colorSustainAdd`
@@ -186,9 +210,18 @@ Runtime dependencies: **none**. TypeScript is the only devDependency. No framewo
   1 = dull/short). Raising sustain + brightening damping is what stopped chords
   from reading as one percussive blip.
 - Humanization (`startVoice`): random detune (`detuneCents`), start jitter
-  (`jitterMs`), and a per-string peak that boosts the bass string. Attack scoops
-  come from each string's `voices[s].scoopCents` (the thick two get one); piano
-  notes (`playNotes`) strike clean through a plain random profile.
+  (`jitterMs`), and a velocity spread. Attack scoops come from each guitar
+  string's `voices[s].scoopCents` (the thick two get one) or the piano
+  register's `scoopCents`.
+- Piano notes ring apart like the guitar strings do (`playNotes(midis, true)`):
+  instead of one flat random profile, each key resolves its own identity by
+  *register* from `cfg.piano` (`registerParams` in `audio.ts` interpolates
+  `cfg.piano.low` ↔ `cfg.piano.high` — dark/felted/long bass keys →
+  bright/snappy/short treble keys, brightness + damping + sustain + attackMs +
+  scoop + pick + its own EQ). On top, the same `roles.*` root/color accents as
+  guitar (`rootPc` = lowest key's pitch class) and a `panning.spread` sweep
+  bass-left → treble-right. The optional second arg keeps single fretboard dots
+  (register false) on the old plain profile untouched.
 - `stopAudio()` posts a `stop` message to every live worklet node and
   disconnects it (simpler than the old oscillator teardown).
 - All knobs live in `src/synth/config.ts` (`DEFAULT_CONFIG`); the documented
@@ -291,6 +324,60 @@ Verified: the offline-rendered open C now starts silent and rises in steps over
 carrying its own EQ/attack/brightness. The lesson is that the voice log alone
 can lie — a real render/measurement is the ground truth for anything about sound.
 
+11. **Physical pluck (commuted excitation) — Lead A slice 1. Landed.** Replaced
+    the identical white-noise burst every string used to seed the K–S loop with
+    a *physical pluck*: the loop buffer is initialized to one period of the
+    string's initial triangular displacement, kink at `pickPos` (fraction of
+    string length from the bridge). The resonant harmonics come out as
+    `sin(n·π·pickPos)/n²` — near-bridge picks are bright, near-nut are fat, and
+    each string being plucked at its own spot (now `voices[s].pickPos`,
+    0.75→0.3 low→high) makes the six voices timbrally distinct *by
+    construction*, not via post-EQ. In-loop noise is gone; the only noise left
+    is the existing pick scrape, which is what a real pick adds on top of the
+    pitched onset. **Deferred:** the fractional-delay/allpass damping loop half
+    of Lead A — the excitation was the bigger audible win; measure the new tail
+    before touching the loop filter.
+12. **Two-stage damping + allpass delay — Lead A slice 2. Landed.** The loop
+    got its physical curve: the fractional part of the period is now a
+    first-order allpass (pitch-exact at DC, and it sharpens high partials a
+    touch — real string stiffness), and the loss is two cascaded one-poles
+    (`damping` sets sustained brightness, new `decay` steepens the tail so
+    wound lows burn their highs off fast while plain highs keep a sparkly
+    ring). `voices[s].decay` 0.50→0.18 low→high. `audio-sched.mjs` now asserts
+    each voice has a *distinct* tail decay and that the high strings' tails
+    stay brighter than the lows'. Remaining Lead A: none — on to Lead B
+    (ringing body/IR).
+13. **Synthesized body IR — Lead B. Tried twice, reverted.** Fed every voice
+    through a `ConvolverNode` whose buffer was a procedurally synthesized
+    guitar-body impulse (`src/synth/body.ts`, modal damped sinusoids +
+    attack tick, deterministic seeded phases). Verdict by ear both times:
+    **super wobbly / beating** — clean in-the-box few-mode sines oscillate
+    against each other ('going back and forth high and low too fast'), and a
+    dense 20-mode irregular + seeded-phase + noise-tick redesign with
+    `irLevel 0.5` was *worse*. Lesson: a handful of synthesized resonators
+    can't fake a body's broadband mic-blend; the 'box' needs something with
+    real spectral density (recorded IR, or body modes fed densely per-note
+    rather than one shared convolution). Reverted to the pre-IR static body EQ
+    (the sound the user approved). Revisit only as a *recorded* IR (ship a
+    `.wav` asset), never synthetic sines. The static body EQ remains the
+    correct current body.
+
+9. **Piano register identity (landed on `dev-audio`, on pause)** — gave piano
+   keys the guitar treatment: `cfg.piano` low/high register profiles (dark
+   felted bass → bright snappy treble) interpolated by MIDI in `registerParams`,
+   root/color roles + bass-left→treble-right pan in `playNotes(midis, true)`.
+   Committed (`41cf7e9`); user verdict after listening: **still reads as "one
+   sound"**, and suspicions opened the bigger question below.
+
+10. **The real complaint (pivot): it doesn't capture the instruments.**
+    User: "it still only sounds like one sound… I don't think we are really
+    capturing the sounds of the instruments." That reframes the goal away from
+    "make voices visually separable in a debug log" toward "each pitch builds a
+    plausible *guitar*, and a chord sounds like a real guitar being strummed."
+    Since then: Lead A (physical string) and Lead C slice 1 are built and
+    approved by ear; Lead B (synthesized body IR) failed by ear twice and was
+    reverted. The remaining candidates follow below — discuss before building.
+
 ## Dev branches & the frozen public site
 
 The user wants the live Pages site **frozen as-is** while audio work continues.
@@ -322,3 +409,60 @@ Policy:
   authentic — plausible as a new `mute` section in `DEFAULT_CONFIG` (level,
   length, brightness) with a per-note worklet param for "muted" mode. Discuss
   before building (how prominent it should be, and whether it's on by default).
+
+### Guitar realism leads (from progress 10 — "capturing the instruments")
+
+Discussed with the user (commit `41cf7e9`): whole team vs "one sound". The piano
+register work is parked; guitar realism is the active thread. Candidate leads:
+
+- **Physical string core (commuted synthesis).** **Done** — see progress 11–12.
+  The loop is seeded with a position-dependent triangular pluck (`pickPos`,
+  harmonics `sin(n·π·pickPos)/n²`), and the fractional-delay allpass + two-stage
+  damping loop (`damping`/`decay`) gives partials a physical decay curve.
+- **Body as ringing resonators.** The current shared body EQ is static — it
+  shapes but never *rings*. A real guitar's top couples to the strings and
+  resonates at fixed modes (monopole ~90–110 Hz, first ~200 Hz, treble peaks),
+  which is most of "it sounds like a box." Two ways: (a) synthesize a guitar
+  body IR and run every voice through `ConvolverNode` (and/or a *ringing* set of
+  high-Q peaking filters fed by the string), or (b) commit small recorded IR
+  assets (still zero runtime deps — the app just ships `.wav`s). Recording or
+  shipping a real guitar IR is the highest realism-per-effort step available.
+  **Attempted (progress 13):** the synthesized `ConvolverNode` IR beat/wobbled
+  badly by ear twice and was reverted. Only a *recorded* IR (option b) remains
+  worth trying — never synthetic sines.
+14. **Attacks separated from sample one — Lead C slice 1. Landed.** Before this,
+    every string's pick scrape was the *same* first-differenced white noise,
+    scaled by level only — the onsets all shared one texture. Now each string's
+    scrape carries its own shape: a one-pole highpass whose cutoff is set by
+    `voices[s].pickBright` (~350 Hz..9 kHz; wound lows scrape dark/plosive,
+    plain highs thin/bright) and its own length `pickDecayMs` (4.5 ms lows →
+    1.5 ms highs). The transient is noise highpassed as `x − lp`, decaying over
+    `k²`. Onset separation is now *constructive*, not just post-loop EQ, and it
+    tracks `pickPos` (near-nut = dark scrape, near-bridge = bright). Debug
+    events carry `pickBright`/`pickDecayMs`; `audio-sched.mjs` asserts the six
+    voices are distinct in both and that highs are brighter *and* shorter.
+    **Remaining Lead C:** a pitched pre-ring "slap" (bandlimited transient
+    before the triangle) and attack bloom (bright onset settling to the loop's
+    brightness).
+- **Attack/transient redesign.** Slice 1 landed — see progress 14: each string's
+  scrape now carries its own brightness (`pickBright`) and length
+  (`pickDecayMs`), so onsets separate from sample one. Remaining: a *pitched*
+  pre-ring "slap" (a bandlimited transient before the triangle, so the attack
+  carries the string's own harmonic color) and an attack bloom (bright onset
+  settling to the loop's brightness).
+- **Spatial virtualization.** Current `panning.spread` is a plain stereo pan.
+  Placing each string at its own point on a modeled soundboard/PannerNode with
+  per-string distance/delay + early reflections would make voices feel like they
+  occupy different places in a room rather than one speaker. Real guitars are
+  mostly mono *captured*, though — this helps perceived separation more than
+  realism, and must not fight the strum.
+- **Measurement-driven tuning.** The final bug in the log ("the voice log can
+  lie") applies here too: render offline via `node-web-audio-api`, plot each
+  voice's spectrum + decay (the debug harness already shows peaks), and tune the
+  new pieces against an actual guitar recording wave form. Without real
+  measurement, "more realism" keeps landing as "a different synth pluck."
+- **Framing check (worth raising before any of the above):** a real strummed
+  chord *is* one instrument, captured together — so the target might be "a
+  believable recorded guitar chord," not "six separable instruments." That
+  determines whether separation or spectral realism wins; the user's phrasing
+  ("capturing the sounds of the instruments") points at the former.

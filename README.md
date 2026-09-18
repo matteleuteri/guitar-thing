@@ -87,16 +87,24 @@ toggle; C·E·G is preselected. Duplicates aren't possible, order doesn't matter
 
 Vanilla TypeScript → ES modules, no frameworks, zero runtime dependencies.
 
-**Sound.** Every note is a physically-modeled plucked string: a Karplus–Strong
-delay-line resonator (`src/synth/pluck-worklet.ts`) with a pick-attack transient,
-body-resonance EQ, a small room tail, and per-note humanization (detune, timing
-jitter, an attack scoop on the low strings, and a slight stereo spread with bass
-left / treble right). Guitar chords strum treble → bass one string at a time
-(~120 ms apart, ±jitter so it doesn't tick like a sequencer) and piano voicings
-roll ~8 ms so voices don't fuse. All of it — including the strum roll,
-per-string timbre variation, and pan — is tunable from one config constant:
-`DEFAULT_CONFIG` in `src/synth/config.ts`. The piano uses the same
-plucked-string voice; solo keys strike clean (no scoop).
+**Sound.** Every note is a physically-modeled plucked string (`src/synth/pluck-worklet.ts`):
+the loop is seeded with a real pluck shape — a triangular displacement whose kink
+sits at the pick point (`pickPos`), so each string excites its own harmonics by
+construction — then rings through a fraction-of-a-sample delay, a two-stage bright/
+decay loop, a shared body EQ and a small room tail. Each guitar string has a fixed
+character (pickup-style EQ, attack, scrape brightness/length); the chord's root and
+color tones are accented systematically, with only a thin random humanizing sliver
+(detune, jitter) left over. Guitar chords strum treble → bass one string at a time
+(scrollable via the "Strum speed (ms)" field) and piano voicings roll ~8 ms so
+voices don't fuse. All of it is tunable from one config constant: `DEFAULT_CONFIG`
+in `src/synth/config.ts`.
+
+**Piano.** Keys ring apart by register: each key's character is interpolated from a
+dark/felted/long bass profile to a bright/snappy/short treble profile (`cfg.piano`).
+Solo fretboard dots keep a plain profile.
+
+> Audio work in progress lives on the `dev-audio` branch; the live site's `main`
+> is deliberately frozen. See `AGENTS.md` for the current approved sound.
 
 **Debugging the sound.** `npm run debug` then open
 `/debug/audio-debug.html`: it auto-strums a few chords and shows the RMS

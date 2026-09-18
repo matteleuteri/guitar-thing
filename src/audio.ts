@@ -30,6 +30,10 @@ function clamp01(v: number): number {
   return Math.min(1, Math.max(0, v));
 }
 
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
 function ringSeconds(freq: number, cfg: PluckAudioConfig): number {
   return Math.max(0.8, (cfg.ring.baseMs - (cfg.ring.perKHzMs * freq) / 1000) / 1000);
 }
@@ -68,12 +72,12 @@ function humanize(freq: number, cfg: PluckAudioConfig): { freq: number; jitter: 
 /**
  * Per-note sound parameters, fully resolved before the note is scheduled.
  * `playVoicing` builds these from the systematic string `voices` + `roles`
- * tables; `playNotes` uses the piano path (plain random profile).
+ * tables; `playNotes` uses the piano register profile (`cfg.piano`) + `roles`.
  */
 interface VoiceParams {
   scoopCents: number;
   peak: number;
-  /** Noise-burst loudness (0..1). */
+  /** Excitation loudness (0..1): amplitude of the seeded pluck. */
   brightness: number;
   /** Loop lowpass (0..1). */
   damping: number;
@@ -81,12 +85,29 @@ interface VoiceParams {
   sustain: number;
   /** Pick-scrape transient level (0..1). */
   pick: number;
+  /**
+   * Brightness of this voice's scrape transient (0..1 → highpass cutoff
+   * ~350 Hz..9 kHz). Wound lows scrape dark/plosive, plain highs bright/thin.
+   */
+  pickBright?: number;
+  /** Length of this voice's scrape transient in ms. */
+  pickDecayMs?: number;
   /** Stereo pan -1..1. */
   pan: number;
   /** "root" when the note is the chord's root pitch class, else "color". */
   role: "root" | "color";
   /** Host-side gain ramp in ms: slow = bass thump, fast = treble snap. */
   attackMs: number;
+  /**
+   * Where along the string the pick strikes (0..1, from the bridge). Seeds the
+   * K–S loop's initial displacement so this voice excites its own harmonics.
+   */
+  pickPos?: number;
+  /**
+   * Second one-pole loop loss (0..1) steepening the tail's high-partial decay,
+   * so each string (wound vs plain) darkens along its own curve.
+   */
+  decay?: number;
   /** Optional per-string tone EQ (pickup voicing) applied before the volume stage. */
   eq?: { lowpassHz?: number; peakHz?: number; peakGainDb?: number; peakQ?: number };
 }
@@ -107,7 +128,10 @@ function startVoice(freq: number, t: number, p: VoiceParams, cfg: PluckAudioConf
     damping: p.damping,
     sustain: p.sustain,
     pick: p.pick,
+    pickBright: p.pickBright ?? cfg.attack.pickBright,
+    pickDecayMs: p.pickDecayMs ?? cfg.attack.pickMs,
     attackMs: p.attackMs,
+    decay: p.decay ?? 0.25,
   });
 
   const node = new AudioWorkletNode(ctx, "pluck-string", {
@@ -116,11 +140,13 @@ function startVoice(freq: number, t: number, p: VoiceParams, cfg: PluckAudioConf
       sustain: p.sustain,
       brightness: p.brightness,
       damping: p.damping,
-      excitationMs: cfg.string.excitationMs,
       pickLevel: p.pick,
-      pickMs: cfg.attack.pickMs,
+      pickBright: p.pickBright ?? cfg.attack.pickBright,
+      pickDecayMs: p.pickDecayMs ?? cfg.attack.pickMs,
       scoopCents: p.scoopCents,
       scoopMs: cfg.scoop.ms,
+      pickPos: p.pickPos ?? 0.2,
+      decay: p.decay ?? 0.25,
       ringFrames: Math.floor(ctx.sampleRate * ringSeconds(hz, cfg)),
     },
   });
@@ -148,7 +174,7 @@ function startVoice(freq: number, t: number, p: VoiceParams, cfg: PluckAudioConf
     }
   }
 
-  // Fade in over a few ms so the noise burst can't click; `peak` sets volume.
+  // Fade in over a few ms so the attack can't click; `peak` sets volume.
   // `attackMs` varies per string: bass strings thump in slow, treble snaps fast.
   // CRITICAL: a GainNode's AudioParam starts at 1.0, and an AudioWorkletNode
   // sounds the moment it is connected — so without zeroing the gain from the
@@ -233,35 +259,98 @@ export function playVoicing(frets: (number | null)[], tuning: number[]): void {
       const sustain = clamp01(v.sustain + (isRoot ? r.rootSustainAdd : r.colorSustainAdd) + (Math.random() * 2 - 1) * cfg.variation.sustainSpread);
       const pick = clamp01(v.pick * (isRoot ? r.rootPick : r.colorPick));
       const scoop = v.scoopCents;
-      startVoice(midiToFreq(midi), base + Math.max(0, off), { scoopCents: scoop, peak, brightness, damping, sustain, pick, pan, role, attackMs: v.attackMs, eq: v.eq }, cfg);
+      startVoice(midiToFreq(midi), base + Math.max(0, off), { scoopCents: scoop, peak, brightness, damping, decay: v.decay, sustain, pick, pickBright: v.pickBright, pickDecayMs: v.pickDecayMs, pan, role, attackMs: v.attackMs, pickPos: v.pickPos, eq: v.eq }, cfg);
     }
   });
 }
 
-/** Pluck a set of MIDI keys together (piano voicing). */
-export function playNotes(midis: number[]): void {
+/**
+ * Interpolate the piano register profile (dark thumpy lows → bright snappy
+ * highs) for one MIDI key, so no two keys of a voicing share a sound.
+ * `peak`, the caller-defined parts, `pan`, and `role` are supplied after.
+ */
+function registerParams(
+  midi: number,
+  cfg: PluckAudioConfig,
+): Omit<VoiceParams, "peak" | "pan" | "role"> {
+  const { low, high } = cfg.piano;
+  const t = clamp01((midi - low.midi) / (high.midi - low.midi));
+  // Interpolate each EQ knob where both endpoints define it; otherwise fall
+  // back to the endpoint that has it.
+  const pick = (a: number | undefined, b: number | undefined): number | undefined => {
+    if (a === undefined && b === undefined) return undefined;
+    if (a === undefined) return b;
+    if (b === undefined) return a;
+    return lerp(a, b, t);
+  };
+  const lowpassHz = pick(low.eq?.lowpassHz, high.eq?.lowpassHz);
+  const peakHz = pick(low.eq?.peakHz, high.eq?.peakHz);
+  return {
+    scoopCents: lerp(low.scoopCents, high.scoopCents, t),
+    brightness: lerp(low.brightness, high.brightness, t),
+    damping: lerp(low.damping, high.damping, t),
+    sustain: lerp(low.sustain, high.sustain, t),
+    pick: lerp(low.pick, high.pick, t),
+    attackMs: lerp(low.attackMs, high.attackMs, t),
+    eq:
+      lowpassHz !== undefined || peakHz !== undefined
+        ? {
+            lowpassHz,
+            peakHz,
+            peakGainDb: pick(low.eq?.peakGainDb, high.eq?.peakGainDb),
+            peakQ: pick(low.eq?.peakQ, high.eq?.peakQ),
+          }
+        : undefined,
+  };
+}
+
+/**
+ * Play MIDI keys. With `register` (piano) each key resolves its own identity
+ * from `cfg.piano` by register, is accented as root/color like a guitar
+ * voicing, and is panned bass-left → treble-right — so the notes of a piano
+ * chord ring out individually instead of fusing like one identical pluck.
+ * Without it (single guitar-fretboard dots) behavior is unchanged: a plain
+ * random profile.
+ */
+export function playNotes(midis: number[], register = false): void {
   if (midis.length === 0) return;
   const cfg = DEFAULT_CONFIG;
   schedule(async () => {
     await ensure();
     const base = ctx!.currentTime + NOTE_START;
     const roll = cfg.strum.pianoMs / 1000;
-    for (let i = 0; i < midis.length; i++) {
-      const peak = (cfg.micro.peak * (i === 0 ? 1.3 : 1) * (midis.length / 6) ** 0.5 + 0.06) * 0.9;
-      const spread = cfg.variation;
+    const count = midis.length;
+    const rootPc = count > 1 ? Math.min(...midis.map((m) => m % 12)) : -1;
+    const r = cfg.roles;
+    const spread = cfg.variation;
+    for (let i = 0; i < count; i++) {
+      const midi = midis[i]!;
+      const isRoot = count > 1 && midi % 12 === rootPc;
+      const peak = register
+        ? (cfg.micro.peak * (isRoot ? r.rootVel : r.colorVel) * (i === 0 ? cfg.balance.bassBoost : 1) * (count / 10) ** 0.5 + 0.06) *
+          (1 + (Math.random() * 2 - 1) * spread.velocitySpread)
+        : (cfg.micro.peak * (i === 0 ? 1.3 : 1) * (count / 6) ** 0.5 + 0.06) * 0.9;
+      const pan = register && count > 1 ? ((i / (count - 1)) * 2 - 1) * cfg.panning.spread : 0;
+      const p = register ? registerParams(midi, cfg) : null;
+      // Neutral multipliers when there's no breakdown to accent (single
+      // guitar-fretboard dots keep their historical plain profile untouched).
+      const chroma = register
+        ? { b: isRoot ? r.rootBright : r.colorBright, d: isRoot ? r.rootDamp : r.colorDamp, s: isRoot ? r.rootSustainAdd : r.colorSustainAdd, pk: isRoot ? r.rootPick : r.colorPick }
+        : { b: 1, d: 1, s: 0, pk: 1 };
       startVoice(
-        midiToFreq(midis[i]!),
+        midiToFreq(midi),
         base + i * roll,
         {
-          scoopCents: 0,
+          scoopCents: p?.scoopCents ?? 0,
           peak,
-          brightness: clamp01(cfg.string.brightness + (Math.random() * 2 - 1) * spread.brightnessSpread),
-          damping: clamp01(cfg.string.damping + (Math.random() * 2 - 1) * spread.dampingSpread),
-          sustain: clamp01(cfg.string.sustain + (Math.random() * 2 - 1) * spread.sustainSpread),
-          pick: cfg.attack.pickLevel,
-          pan: 0,
-          role: "color",
-          attackMs: 3,
+          pan,
+          role: isRoot ? "root" : "color",
+          brightness: clamp01((p?.brightness ?? cfg.string.brightness) * chroma.b + (Math.random() * 2 - 1) * spread.brightnessSpread),
+          damping: clamp01((p?.damping ?? cfg.string.damping) * chroma.d + (Math.random() * 2 - 1) * spread.dampingSpread),
+          sustain: clamp01((p?.sustain ?? cfg.string.sustain) + chroma.s + (Math.random() * 2 - 1) * spread.sustainSpread),
+          pick: clamp01((p?.pick ?? cfg.attack.pickLevel) * chroma.pk),
+          attackMs: p?.attackMs ?? 3,
+          eq: p?.eq,
         },
         cfg,
       );
@@ -291,7 +380,7 @@ export interface AudioDebugEvent {
   pan: number;
   /** "root" when the note is the chord's root pitch class, else "color". */
   role: "root" | "color";
-  /** Noise-burst loudness of this voice (0..1). */
+  /** Excitation loudness of this voice (0..1). */
   brightness: number;
   /** Loop lowpass of this voice (0..1). */
   damping: number;
@@ -299,6 +388,12 @@ export interface AudioDebugEvent {
   sustain: number;
   /** Pick-scrape level of this voice (0..1). */
   pick: number;
+  /** Scrape brightness (0..1): dark/plosive lows → bright/snappy highs. */
+  pickBright: number;
+  /** Scrape length in ms (lows linger, highs snap). */
+  pickDecayMs: number;
+  /** Second one-pole loop loss — how fast high partials burn off (0..1). */
+  decay: number;
   /** Host-side gain ramp in ms. */
   attackMs: number;
 }
