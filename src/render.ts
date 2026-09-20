@@ -2,23 +2,17 @@ import { playNotes, playVoicing } from "./audio.js";
 import { findPositions, type Fingering } from "./fretboard.js";
 import { midiName, SEMITONES } from "./theory.js";
 
+/** Create an element with an optional class and text content. */
 export function el(tag: string, cls?: string, text?: string | number): HTMLElement {
-  const n = document.createElement(tag);
-  if (cls) n.className = cls;
-  if (text !== undefined) n.textContent = String(text);
-  return n;
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text !== undefined) node.textContent = String(text);
+  return node;
 }
 
-export function colorFor(pc: number): string {
-  return `hsl(${(pc * 30) % 360} 82% 60%)`;
-}
-
-function pcAt(tuning: number[], s: number, f: number): number {
-  return (tuning[s]! + f) % SEMITONES;
-}
-
-function soundingMidi(tuning: number[], s: number, f: number|null): number | null {
-  return f === null ? null : tuning[s]! + f;
+/** Fixed fill per pitch class so the board, legend and diagrams always agree. */
+export function colorFor(pitchClass: number): string {
+  return `hsl(${(pitchClass * 30) % 360} 82% 60%)`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -27,33 +21,34 @@ function soundingMidi(tuning: number[], s: number, f: number|null): number | nul
 
 export function renderPositions(
   tuning: number[],
-  targetPcs: number[],
+  targetPitchClasses: number[],
   maxFrets: number,
-  nameOf: (pc: number) => string,
+  nameOf: (pitchClass: number) => string,
 ): HTMLElement {
-  const positions = findPositions(targetPcs, tuning, maxFrets);
-  const posByPos = new Set(positions.filter((p) => p.fret > 0).map((p) => `${p.string}:${p.fret}`));
-  const colCount = maxFrets;
+  const positions = findPositions(targetPitchClasses, tuning, maxFrets);
+  const positionKeys = new Set(
+    positions.filter((p) => p.fret > 0).map((p) => `${p.stringIndex}:${p.fret}`),
+  );
 
   const box = el("div", "fb");
-  box.style.setProperty("--col-count", String(colCount));
+  box.style.setProperty("--col-count", String(maxFrets));
 
   const nut = el("div", "fb-nut");
   for (let i = 0; i < tuning.length; i++) nut.appendChild(el("span", "fb-nut-dot"));
   box.appendChild(nut);
 
-  for (let s = tuning.length - 1; s >= 0; s--) {
+  for (let stringIndex = tuning.length - 1; stringIndex >= 0; stringIndex--) {
     const row = el("div", "fb-row");
-    row.appendChild(el("span", "fb-string-label", midiName(tuning[s]!)));
+    row.appendChild(el("span", "fb-string-label", midiName(tuning[stringIndex])));
 
-    for (let f = 1; f <= maxFrets; f++) {
+    for (let fret = 1; fret <= maxFrets; fret++) {
       const cell = el("div", "fb-cell");
-      if (posByPos.has(`${s}:${f}`)) {
-        const pc = pcAt(tuning, s, f);
-        const dot = el("span", "fb-dot", nameOf(pc));
-        dot.style.setProperty("--c", colorFor(pc));
-        const midi = tuning[s]! + f;
-        dot.title = `${nameOf(pc)} · ${midiName(midi)} · string ${s + 1} fret ${f}`;
+      if (positionKeys.has(`${stringIndex}:${fret}`)) {
+        const pitchClass = (tuning[stringIndex] + fret) % SEMITONES;
+        const dot = el("span", "fb-dot", nameOf(pitchClass));
+        dot.style.setProperty("--c", colorFor(pitchClass));
+        const midi = tuning[stringIndex] + fret;
+        dot.title = `${nameOf(pitchClass)} · ${midiName(midi)} · string ${stringIndex + 1} fret ${fret}`;
         dot.addEventListener("click", () => playNotes([midi]));
         cell.appendChild(dot);
       }
@@ -64,7 +59,7 @@ export function renderPositions(
 
   const fretRow = el("div", "fb-fretrow");
   fretRow.appendChild(el("span"));
-  for (let f = 1; f <= maxFrets; f++) fretRow.appendChild(el("span", "fb-fretnum", String(f)));
+  for (let fret = 1; fret <= maxFrets; fret++) fretRow.appendChild(el("span", "fb-fretnum", String(fret)));
   box.appendChild(fretRow);
 
   return box;
@@ -74,31 +69,34 @@ export function renderPositions(
 /* Chord diagrams                                                      */
 /* ------------------------------------------------------------------ */
 
+/** Finger numbers ranked by fret (0 = open/muted, no number shown). */
 function assignFingers(frets: (number | null)[]): number[] {
   const sounding: number[] = [];
-  for (const f of frets) if (f !== null && f > 0) sounding.push(f);
+  for (const fret of frets) if (fret !== null && fret > 0) sounding.push(fret);
   const distinct = Array.from(new Set(sounding)).sort((a, b) => a - b);
   const rank = new Map<number, number>();
-  distinct.forEach((f, i) => rank.set(f, i + 1));
-  return frets.map((f) => (f === null || f === 0 ? 0 : rank.get(f)!));
+  distinct.forEach((fret, i) => rank.set(fret, i + 1));
+  return frets.map((fret) => (fret === null || fret === 0 ? 0 : rank.get(fret)!));
 }
 
+/** Contiguous runs of the same fretted fret across ≥2 adjacent strings. */
 function findBarres(frets: (number | null)[]): { fret: number; count: number }[] {
   const out: { fret: number; count: number }[] = [];
   let i = 0;
   while (i < frets.length) {
-    const f = frets[i];
-    if (f === null || f === 0) { i++; continue; }
+    const fret = frets[i];
+    if (fret === null || fret === 0) { i++; continue; }
     let j = i;
-    while (j + 1 < frets.length && frets[j + 1] === f) j++;
-    if (j - i + 1 >= 2) out.push({ fret: f, count: j - i + 1 });
+    while (j + 1 < frets.length && frets[j + 1] === fret) j++;
+    if (j - i + 1 >= 2) out.push({ fret, count: j - i + 1 });
     i = j + 1;
   }
   return out;
 }
 
+/** How many strings a fingering mutes. */
 function mutedCount(frets: (number | null)[]): number {
-  return frets.filter((f) => f === null).length;
+  return frets.filter((fret) => fret === null).length;
 }
 
 /* ------------------------------------------------------------------ */
@@ -112,62 +110,68 @@ interface KeyView {
   blacks: number[];
 }
 
+/** Split a MIDI range into white and black key numbers. */
 function keyView(low: number, high: number): KeyView {
   const whites: number[] = [];
   const blacks: number[] = [];
-  for (let m = Math.min(low, high); m <= Math.max(low, high); m++) {
-    if (WHITE_PCS.has(((m % SEMITONES) + SEMITONES) % SEMITONES)) whites.push(m);
-    else blacks.push(m);
+  for (let midi = Math.min(low, high); midi <= Math.max(low, high); midi++) {
+    if (WHITE_PCS.has(((midi % SEMITONES) + SEMITONES) % SEMITONES)) whites.push(midi);
+    else blacks.push(midi);
   }
   return { whites, blacks };
 }
 
+/**
+ * Shared keyboard: white keys in a flex row, black keys absolutely positioned
+ * by white-key-count offset. `marked` fills target keys, `held` marks song-held
+ * keys, each key plays its MIDI note on click.
+ */
 function keyboardEl(
   low: number,
   high: number,
   marked: Set<number>,
-  nameOf: (pc: number) => string,
+  nameOf: (pitchClass: number) => string,
   baseClass: string,
   extraClass = "",
   held?: Set<number>,
 ): HTMLElement {
   const { whites, blacks } = keyView(low, high);
-  const wc = Math.max(1, whites.length);
+  const whiteCount = Math.max(1, whites.length);
   const box = el("div", extraClass ? `${baseClass} ${extraClass}` : baseClass);
   box.style.maxWidth = `max(9rem, calc(var(--key-w, 2.4rem) * ${whites.length}))`;
 
-  const wrow = el("div", `${baseClass}-white`);
-  for (const m of whites) {
-    const pc = ((m % SEMITONES) + SEMITONES) % SEMITONES;
-    const wkey = el("div", `${baseClass}-wkey`);
-    if (marked.has(m)) {
-      wkey.style.background = colorFor(pc);
-      wkey.classList.add("kb-hit");
+  const whiteRow = el("div", `${baseClass}-white`);
+  for (const midi of whites) {
+    const pitchClass = ((midi % SEMITONES) + SEMITONES) % SEMITONES;
+    const whiteKey = el("div", `${baseClass}-wkey`);
+    if (marked.has(midi)) {
+      whiteKey.style.background = colorFor(pitchClass);
+      whiteKey.classList.add("kb-hit");
     }
-    if (held?.has(m)) wkey.classList.add("kb-held");
-    wkey.appendChild(el("span", `${baseClass}-mark`, nameOf(pc)));
-    wkey.title = midiName(m);
-    wkey.addEventListener("click", () => playNotes([m], true));
-    wrow.appendChild(wkey);
+    if (held?.has(midi)) whiteKey.classList.add("kb-held");
+    whiteKey.appendChild(el("span", `${baseClass}-mark`, nameOf(pitchClass)));
+    whiteKey.title = midiName(midi);
+    whiteKey.addEventListener("click", () => playNotes([midi], true));
+    whiteRow.appendChild(whiteKey);
   }
-  box.appendChild(wrow);
+  box.appendChild(whiteRow);
 
-  for (const m of blacks) {
-    let leftCount = 0;
-    for (const w of whites) if (w < m) leftCount++;
-    const pc = ((m % SEMITONES) + SEMITONES) % SEMITONES;
-    const bkey = el("div", `${baseClass}-bkey`);
-    if (marked.has(m)) {
-      bkey.style.background = colorFor(pc);
-      bkey.classList.add("kb-hit");
+  for (const midi of blacks) {
+    let whiteKeysToTheLeft = 0;
+    for (const white of whites) if (white < midi) whiteKeysToTheLeft++;
+    const pitchClass = ((midi % SEMITONES) + SEMITONES) % SEMITONES;
+    const blackKey = el("div", `${baseClass}-bkey`);
+    if (marked.has(midi)) {
+      blackKey.style.background = colorFor(pitchClass);
+      blackKey.classList.add("kb-hit");
     }
-    if (held?.has(m)) bkey.classList.add("kb-held");
-    bkey.style.left = `${(leftCount / wc) * 100}%`;
-    bkey.style.width = `${(0.62 / wc) * 100}%`;
-    bkey.title = midiName(m);
-    bkey.addEventListener("click", () => playNotes([m], true));
-    bkey.appendChild(el("span", `${baseClass}-mark`, nameOf(pc)));
-    wrow.appendChild(bkey);
+    if (held?.has(midi)) blackKey.classList.add("kb-held");
+    blackKey.style.left = `${(whiteKeysToTheLeft / whiteCount) * 100}%`;
+    blackKey.style.width = `${(0.62 / whiteCount) * 100}%`;
+    blackKey.title = midiName(midi);
+    blackKey.addEventListener("click", () => playNotes([midi], true));
+    blackKey.appendChild(el("span", `${baseClass}-mark`, nameOf(pitchClass)));
+    whiteRow.appendChild(blackKey);
   }
   return box;
 }
@@ -176,14 +180,14 @@ function keyboardEl(
 export function renderPiano(
   low: number,
   high: number,
-  targetPcs: number[],
-  nameOf: (pc: number) => string,
+  targetPitchClasses: number[],
+  nameOf: (pitchClass: number) => string,
 ): HTMLElement {
-  const targets = new Set(targetPcs);
+  const targets = new Set(targetPitchClasses);
   const marked = new Set<number>();
   const { whites, blacks } = keyView(low, high);
-  for (const m of [...whites, ...blacks]) {
-    if (targets.has(((m % SEMITONES) + SEMITONES) % SEMITONES)) marked.add(m);
+  for (const midi of [...whites, ...blacks]) {
+    if (targets.has(((midi % SEMITONES) + SEMITONES) % SEMITONES)) marked.add(midi);
   }
   return keyboardEl(low, high, marked, nameOf, "kb");
 }
@@ -191,7 +195,7 @@ export function renderPiano(
 /** Mini keyboard showing one piano voicing; ▶ plays the pressed keys. Held keys get `.kb-held`. */
 export function renderPianoVoicing(
   keys: number[],
-  nameOf: (pc: number) => string,
+  nameOf: (pitchClass: number) => string,
   id: number,
   opts?: { held?: number[] },
 ): HTMLElement {
@@ -202,8 +206,8 @@ export function renderPianoVoicing(
 
   const play = el("button", "cd-play", "▶");
   play.title = "Play voicing";
-  play.addEventListener("click", (e) => {
-    e.stopPropagation();
+  play.addEventListener("click", (event) => {
+    event.stopPropagation();
     playNotes(keys, true);
   });
   box.appendChild(play);
@@ -218,7 +222,7 @@ export function renderPianoVoicing(
 export function renderChordDiagram(
   fingering: Fingering,
   tuning: number[],
-  nameOf: (pc: number) => string,
+  nameOf: (pitchClass: number) => string,
   id: number,
   opts?: { held?: boolean[] },
 ): HTMLElement {
@@ -230,41 +234,41 @@ export function renderChordDiagram(
 
   const play = el("button", "cd-play", "▶");
   play.title = "Play voicing";
-  play.addEventListener("click", (e) => {
-    e.stopPropagation();
+  play.addEventListener("click", (event) => {
+    event.stopPropagation();
     playVoicing(frets, tuning);
   });
   box.appendChild(play);
 
   // Head row: mute / open markers per string.
   const head = el("div", "cd-head");
-  for (let s = 0; s < frets.length; s++) {
-    const f = frets[s]!;
-    const marker = el("span", held[s] ? "cd-held" : "", f === null ? "×" : f === 0 ? "○" : "");
-    if (f === null || f === 0) marker.title = held[s] ? "held open string" : "";
+  for (let stringIndex = 0; stringIndex < frets.length; stringIndex++) {
+    const fret = frets[stringIndex];
+    const marker = el("span", held[stringIndex] ? "cd-held" : "", fret === null ? "×" : fret === 0 ? "○" : "");
+    if (fret === null || fret === 0) marker.title = held[stringIndex] ? "held open string" : "";
     head.appendChild(marker);
   }
   box.appendChild(head);
 
   // Body rows: fretted positions. Every diagram gets at least three frets so a
   // simple (or all-open) chord still reads as a grid beside fuller ones.
-  const positives = frets.filter((f): f is number => f !== null && f > 0);
+  const positives = frets.filter((fret): fret is number => fret !== null && fret > 0);
   const body = el("div", "cd-body");
-  const lo = positives.length > 0 ? Math.min(...positives) : 1;
-  const hi = Math.max(positives.length > 0 ? Math.max(...positives) : lo, lo + 2);
-  for (let f = lo; f <= hi; f++) {
+  const lowFret = positives.length > 0 ? Math.min(...positives) : 1;
+  const highFret = Math.max(positives.length > 0 ? Math.max(...positives) : lowFret, lowFret + 2);
+  for (let fret = lowFret; fret <= highFret; fret++) {
     const row = el("div", "cd-row");
-    row.appendChild(el("span", "cd-fretnum", f));
-    for (let s = 0; s < tuning.length; s++) {
+    row.appendChild(el("span", "cd-fretnum", fret));
+    for (let stringIndex = 0; stringIndex < tuning.length; stringIndex++) {
       const cell = el("div", "cd-cell");
       cell.appendChild(el("span", "cd-string"));
-      if (frets[s] === f) {
-        const pc = pcAt(tuning, s, f);
-        const dot = el("span", held[s] ? "cd-dot cd-held" : "cd-dot", nameOf(pc));
-        dot.style.setProperty("--c", colorFor(pc));
-        dot.title = held[s]
-          ? `${nameOf(pc)} · ${midiName(tuning[s]! + f)} · string ${s + 1} fret ${f} · held`
-          : `${nameOf(pc)} · ${midiName(tuning[s]! + f)} · string ${s + 1} fret ${f}`;
+      if (frets[stringIndex] === fret) {
+        const pitchClass = (tuning[stringIndex] + fret) % SEMITONES;
+        const dot = el("span", held[stringIndex] ? "cd-dot cd-held" : "cd-dot", nameOf(pitchClass));
+        dot.style.setProperty("--c", colorFor(pitchClass));
+        dot.title = held[stringIndex]
+          ? `${nameOf(pitchClass)} · ${midiName(tuning[stringIndex] + fret)} · string ${stringIndex + 1} fret ${fret} · held`
+          : `${nameOf(pitchClass)} · ${midiName(tuning[stringIndex] + fret)} · string ${stringIndex + 1} fret ${fret}`;
         cell.appendChild(dot);
       }
       row.appendChild(cell);
@@ -283,15 +287,15 @@ export function renderChordDiagram(
   // Finger numbers.
   const fingers = assignFingers(frets);
   const foot = el("div", "cd-foot");
-  for (let s = 0; s < tuning.length; s++) {
-    const fr = frets[s];
-    foot.appendChild(el("span", "", fr === null ? "" : fingers[s] === 0 ? "o" : String(fingers[s])));
+  for (let stringIndex = 0; stringIndex < tuning.length; stringIndex++) {
+    const fret = frets[stringIndex];
+    foot.appendChild(el("span", "", fret === null ? "" : fingers[stringIndex] === 0 ? "o" : String(fingers[stringIndex])));
   }
   box.appendChild(foot);
 
   // Played notes reference line.
   const sounding = frets
-    .map((f, s) => (f === null ? "×" : midiName(soundingMidi(tuning, s, f)!)))
+    .map((fret, stringIndex) => (fret === null ? "×" : midiName(tuning[stringIndex] + fret)))
     .join(" ");
   box.appendChild(el("div", "cd-barre", sounding));
 

@@ -12,45 +12,45 @@ export interface SharedGraph {
   voiceIn: GainNode;
 }
 
-function peaking(c: AudioContext, freq: number, gainDb: number, q: number): BiquadFilterNode {
-  const f = c.createBiquadFilter();
-  f.type = "peaking";
-  f.frequency.value = freq;
-  f.gain.value = gainDb;
-  f.Q.value = q;
-  return f;
+function peaking(context: AudioContext, freq: number, gainDb: number, q: number): BiquadFilterNode {
+  const filter = context.createBiquadFilter();
+  filter.type = "peaking";
+  filter.frequency.value = freq;
+  filter.gain.value = gainDb;
+  filter.Q.value = q;
+  return filter;
 }
 
 /** Build the shared bus → body EQ → dry + room → master graph. */
-export function buildSharedGraph(c: AudioContext, cfg: PluckAudioConfig): SharedGraph {
+export function buildSharedGraph(context: AudioContext, config: PluckAudioConfig): SharedGraph {
   // Master bus (kept low so many voices can stack without clipping).
-  const master = c.createGain();
+  const master = context.createGain();
   master.gain.value = 0.7;
 
   // Body EQ: one chesty low resonance, one presence peak. Notes share this.
-  const voiceIn = c.createGain();
-  const bodyLow = peaking(c, cfg.body.lowHz, cfg.body.lowGainDb, 1.2);
-  const presence = peaking(c, cfg.body.presenceHz, cfg.body.presenceGainDb, 1.3);
+  const voiceIn = context.createGain();
+  const bodyLow = peaking(context, config.body.lowHz, config.body.lowGainDb, 1.2);
+  const presence = peaking(context, config.body.presenceHz, config.body.presenceGainDb, 1.3);
   voiceIn.connect(bodyLow);
   bodyLow.connect(presence);
 
   // Dry path straight to the master.
-  const dry = c.createGain();
+  const dry = context.createGain();
   dry.gain.value = 1;
   presence.connect(dry);
   dry.connect(master);
 
   // Room tail: one feedback delay, dampened darkly in its own loop.
-  const roomIn = c.createGain();
-  const delay = c.createDelay(2);
-  delay.delayTime.value = cfg.room.time;
-  const damp = c.createBiquadFilter();
+  const roomIn = context.createGain();
+  const delay = context.createDelay(2);
+  delay.delayTime.value = config.room.time;
+  const damp = context.createBiquadFilter();
   damp.type = "lowpass";
-  damp.frequency.value = cfg.room.dampHz;
-  const feedback = c.createGain();
-  feedback.gain.value = cfg.room.feedback;
-  const wet = c.createGain();
-  wet.gain.value = cfg.room.wet;
+  damp.frequency.value = config.room.dampHz;
+  const feedback = context.createGain();
+  feedback.gain.value = config.room.feedback;
+  const wet = context.createGain();
+  wet.gain.value = config.room.wet;
   presence.connect(roomIn);
   roomIn.connect(delay);
   delay.connect(damp);
@@ -61,14 +61,14 @@ export function buildSharedGraph(c: AudioContext, cfg: PluckAudioConfig): Shared
 
   // Gentle glue, tuned so the strum stays punchy (heavy ratios squash the
   // per-string attacks together into one fused transient).
-  const comp = c.createDynamicsCompressor();
-  comp.threshold.value = -16;
-  comp.knee.value = 8;
-  comp.ratio.value = 2.5;
-  comp.attack.value = 0.004;
-  comp.release.value = 0.35;
-  master.connect(comp);
-  comp.connect(c.destination);
+  const compressor = context.createDynamicsCompressor();
+  compressor.threshold.value = -16;
+  compressor.knee.value = 8;
+  compressor.ratio.value = 2.5;
+  compressor.attack.value = 0.004;
+  compressor.release.value = 0.35;
+  master.connect(compressor);
+  compressor.connect(context.destination);
 
   return { master, voiceIn };
 }

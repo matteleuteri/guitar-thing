@@ -20,15 +20,16 @@ A dependency-free browser app ("Note/Chord Finder") with two instrument modes:
 
 ## Current status (break point — read first)
 
-All in-progress audio work lives on the `dev-audio` branch; the live Pages
-site (`main`) is frozen as-is. **The user approved this sound:** physical
-string core (commuted triangle pluck at per-string `pickPos` → fractional-delay
-allpass → two-stage damping/`decay`) plus per-string scrape shape (`pickBright`
-/`pickDecayMs`) that separates onsets from the first sample. Those two slices
-(Leads A + C-1) are done and sounded good. **Parked after user listening:**
-piano register identity (commit on this branch, still reads as "one sound"),
-and the *synthesized* convolutional body IR, which beat/wobbled badly by ear
-twice and was reverted (a body is only worth retrying as a *recorded* IR).
+All approved audio work is merged into `main` (and pushed to `origin/main`):
+the physical string core (commuted triangle pluck at per-string `pickPos` →
+fractional-delay allpass → two-stage damping/`decay`), per-string scrape shape
+(`pickBright`/`pickDecayMs`) that separates onsets from the first sample, and
+the song/progression mode. `dev-audio` and `song-mode` are merged ancestors
+kept for history. **The user approved this sound:** Leads A + C-1 are done and
+sounded good. **Parked after user listening:** piano register identity (still
+reads as "one sound"), and the *synthesized* convolutional body IR, which
+beat/wobbled badly by ear twice and was reverted (a body is only worth
+retrying as a *recorded* IR).
 **Backlog (discuss before building):** the rest of Lead C (pitched pre-ring
 "slap", attack bloom), Lead D (spatialization), Lead E (offline render vs a
 real recording to measure instead of guess), and the muted-string "thunk".
@@ -76,7 +77,7 @@ from the local `dist/` (that folder is gitignored). CI owns it:
   engines) so the whole arrangement moves as little as possible — a Viterbi/DP
   shortest path over per-chord candidates. `parseChord` lives in `theory.ts` (inverts
   `CHORD_PATTERNS`: root + `#`/`b`, quality suffix incl. `M`/`Maj` aliases, optional
-  `/bass` → `ParsedChord{name, root, bass, pcs}`). Per-chord costs: guitar = per-string
+  `/bass` → `ParsedChord{name, root, bass, pitchClasses}`). Per-chord costs: guitar = per-string
   `|Δfret|` + mute-change penalty + small hand-position jump, piano = sorted-key
   `Σ|ΔMIDI|` + extra-key penalty; slash-chord bass is a soft preference (lowest note
   should match). Chords whose frets/keys are identical to the previous chord are
@@ -113,12 +114,13 @@ Runtime dependencies: **none**. TypeScript is the only devDependency. No framewo
 - Notes are pitch-class integers `0..11` (`C=0 … B=11`). See `SEMITONES`/`SHARP_NAMES`.
 - Tunings are arrays of MIDI note numbers, one per string, **index 0 = lowest
   (thickest) string** (low E in standard), 6 entries.
-- A note at `(string s, fret f)` has MIDI `tuning[s] + f`, pitch class `(tuning[s]+f) % 12`.
+- A note at `(stringIndex, fret)` has MIDI `tuning[stringIndex] + fret`, pitch class
+  `(tuning[stringIndex]+fret) % 12`.
   `fret 0` = open string.
-- `findPositions` returns every matching `{string, fret, pc}`. The renderer drops
+- `findPositions` returns every matching `{stringIndex, fret, pitchClass}`. The renderer drops
   `fret 0` entries (user request: open notes should not show in the positions grid).
-- `findFingerings(chordPcs, tuning, maxFrets, span, cap)`:
-  - `chordPcs` is the **full input note set** — every provided note must sound at
+- `findFingerings(chordPitchClasses, tuning, maxFrets, span, cap)`:
+  - `chordPitchClasses` is the **full input note set** — every provided note must sound at
     least once. There is exactly one chord per query (user request: "all the notes
     provided instead of only a subset"). Minimum 2 notes (user request).
   - Muted strings allowed (`fret: null`); each sounding string must sound a chord note.
@@ -128,8 +130,8 @@ Runtime dependencies: **none**. TypeScript is the only devDependency. No framewo
     produced at the anchor equal to its minimum fret (guarantees unique shapes).
   - `cap` truncates; `truncated` flag is returned. Order of fingerings is not
     musically ranked — don't add heavy heuristics without asking.
-- `findPianoVoicings(pcs, low, high, reach, cap)` — same "one chord from the full
-  note set" contract for piano:
+- `findPianoVoicings(pitchClasses, lowKey, highKey, reach, cap)` — same "one chord from
+  the full note set" contract for piano:
   - A voicing is a set of pressed keys (MIDI numbers) covering every note, with at
     least 2 and at most `MAX_KEYS` (10 = two hands) keys.
   - All keys lie within `reach` semitones. Anchored at their lowest key, so each
@@ -139,7 +141,7 @@ Runtime dependencies: **none**. TypeScript is the only devDependency. No framewo
 - `renderPiano`/`renderPianoVoicing` draw an 88-key-style keyboard (white keys in a
   flex row, black keys absolutely positioned by white-key-count offset).
 - Notes are selected from a **12-slot grid** (`#note-grid`; default C·E·G), toggled in
-  `main.ts`; colors reuse `colorFor(pc)`. Buttons show both spellings via `noteLabels(pc)`
+  `main.ts`; colors reuse `colorFor(pitchClass)`. Buttons show both spellings via `noteLabels(pitchClass)`
   (`SHARP_NAMES`/`FLAT_NAMES` in `theory.ts`, e.g. "C#/Db"), used only on the grid —
   dots/cards/legend stick to sharps. The old free-text parsing (`parseNotes`) still
   exists for the smoke tests and the custom-tuning parser (`parseStringMidi`, accepts
@@ -150,7 +152,7 @@ Runtime dependencies: **none**. TypeScript is the only devDependency. No framewo
   piano default 12) and restored on switch (`spans`/`SPAN_DEFAULTS`/`saveSpan` in
   `main.ts`, tracked via `currentInstrument` — reading `select.value` in the `change`
   handler gives the NEW value, so save the previous one first).
-- `chordName(pcs)` identifies via interval-pattern dictionary keyed from a candidate
+- `chordName(pitchClasses)` identifies via interval-pattern dictionary keyed from a candidate
   root; prefers the lowest pitch class as root; returns `{primary, alternatives}`.
 
 ## Rendering details
@@ -374,7 +376,7 @@ can lie — a real render/measurement is the ground truth for anything about sou
     `.wav` asset), never synthetic sines. The static body EQ remains the
     correct current body.
 
-9. **Piano register identity (landed on `dev-audio`, on pause)** — gave piano
+9. **Piano register identity (landed on `dev-audio`, on pause; merged to `main`)** — gave piano
    keys the guitar treatment: `cfg.piano` low/high register profiles (dark
    felted bass → bright snappy treble) interpolated by MIDI in `registerParams`,
    root/color roles + bass-left→treble-right pan in `playNotes(midis, true)`.
@@ -390,15 +392,16 @@ can lie — a real render/measurement is the ground truth for anything about sou
     approved by ear; Lead B (synthesized body IR) failed by ear twice and was
     reverted. The remaining candidates follow below — discuss before building.
 
-## Dev branches & the frozen public site
+## Branches & the live site
 
-The user wants the live Pages site **frozen as-is** while audio work continues.
-Policy:
+The public Pages site deploys from `main` (see "Deployment" above). History:
+audio/experimental work was once quarantined on `dev-audio` while `main` was
+frozen, but all approved work (per-string identity, physical string core,
+scrape separation, song mode) has since been merged into `main` and pushed.
+Both `dev-audio` and `song-mode` remain as offline history only.
 
-- `.github/workflows/pages.yml` only deploys on push to `main`. Anything committed
-  to any other branch never touches the live site.
-- All in-progress audio/experimental work happens on the `dev-audio` branch;
-  `main` only receives changes the user approves for release.
+- `.github/workflows/pages.yml` only deploys on push to `main`. Anything
+  committed to any other branch never touches the live site.
 - Local dev loop (unchanged): `npm run build && node server.mjs` →
   `localhost:5173`; `npm test` as the gate. Audio experiments are tuned via
   `DEFAULT_CONFIG`, verified with the `/debug/audio-debug.html` harness.
@@ -408,7 +411,7 @@ Policy:
 - ~~**Smarter per-note sound inside a chord.**~~ **Done** — see progress entry 7:
   `voices[]` per-string character + `roles.*` (root vs color) + hand-shaped
   `strum.pattern`, agreed as "String + role + strum, pronounced separation"
-  (commit landed on `dev-audio`; never pushed to the live `main`).
+  (now merged into `main`).
 - **Chord-quality-specific behaviour** — the next level beyond roles: make the
   *quality* itself shape voicing (maj7 sparkly, minor dark, sus ambiguous,
   dim tense...). Not started — would be `roles` growing a quality axis. Build

@@ -17,52 +17,52 @@ const BASS_PENALTY = 2;              // penalty when the lowest note != written 
 
 /** Split a chord-sheet line into chord tokens (space/comma/semicolon/bar). */
 export function parseProgression(input: string): ParsedChord[] {
-  const tokens = input.split(/[\s,;|]+/).map((t) => t.trim()).filter(Boolean);
+  const tokens = input.split(/[\s,;|]+/).map((token) => token.trim()).filter(Boolean);
   if (tokens.length === 0) throw new Error("Enter at least one chord, e.g. C G Am F.");
-  if (tokens.some((t) => t.toUpperCase() === "N.C.")) {
+  if (tokens.some((token) => token.toUpperCase() === "N.C.")) {
     throw new Error('"N.C." (no chord) is not supported yet.');
   }
-  return tokens.map((t) => parseChord(t));
+  return tokens.map((token) => parseChord(token));
 }
 
 /** Generic shortest-path selection: dp[i][j] = min cost ending chord i at voicing j. */
 function bestPath<T>(
   candidates: T[][],
-  nodeCost: (v: T, chord: number) => number,
-  edgeCost: (a: T, b: T, chord: number) => number,
+  nodeCost: (candidate: T, chordIndex: number) => number,
+  edgeCost: (from: T, to: T, chordIndex: number) => number,
 ): { path: T[]; total: number } | null {
-  const n = candidates.length;
-  if (n === 0) return null;
+  const chordCount = candidates.length;
+  if (chordCount === 0) return null;
   if (candidates.some((c) => c.length === 0)) return null;
 
-  let prevBest = candidates[0]!.map((v) => nodeCost(v, 0));
+  let previousBest = candidates[0].map((candidate) => nodeCost(candidate, 0));
   const back: number[][] = [];
-  for (let i = 1; i < n; i++) {
-    const cur = candidates[i]!;
-    const prevCand = candidates[i - 1]!;
-    const curBest = new Array<number>(cur.length).fill(Infinity);
-    const curBack = new Array<number>(cur.length).fill(-1);
-    for (let j = 0; j < cur.length; j++) {
+  for (let chordIndex = 1; chordIndex < chordCount; chordIndex++) {
+    const current = candidates[chordIndex];
+    const previous = candidates[chordIndex - 1];
+    const currentBest = new Array<number>(current.length).fill(Infinity);
+    const currentBack = new Array<number>(current.length).fill(-1);
+    for (let j = 0; j < current.length; j++) {
       let best = Infinity;
-      let bestK = -1;
-      for (let k = 0; k < prevCand.length; k++) {
-        const c = prevBest[k]! + edgeCost(prevCand[k]!, cur[j]!, i);
-        if (c < best) { best = c; bestK = k; }
+      let bestPrevious = -1;
+      for (let k = 0; k < previous.length; k++) {
+        const cost = previousBest[k] + edgeCost(previous[k], current[j], chordIndex);
+        if (cost < best) { best = cost; bestPrevious = k; }
       }
-      curBest[j] = nodeCost(cur[j]!, i) + best;
-      curBack[j] = bestK;
+      currentBest[j] = nodeCost(current[j], chordIndex) + best;
+      currentBack[j] = bestPrevious;
     }
-    back.push(curBack);
-    prevBest = curBest;
+    back.push(currentBack);
+    previousBest = currentBest;
   }
 
   let j = 0;
-  for (let k = 1; k < prevBest.length; k++) if (prevBest[k]! < prevBest[j]!) j = k;
-  const total = prevBest[j]!;
-  const path = new Array<T>(n);
-  for (let i = n - 1; i >= 0; i--) {
-    path[i] = candidates[i]![j]!;
-    if (i > 0) j = back[i - 1]![j]!;
+  for (let k = 1; k < previousBest.length; k++) if (previousBest[k] < previousBest[j]) j = k;
+  const total = previousBest[j];
+  const path = new Array<T>(chordCount);
+  for (let i = chordCount - 1; i >= 0; i--) {
+    path[i] = candidates[i][j];
+    if (i > 0) j = back[i - 1][j];
   }
   return { path, total };
 }
@@ -80,38 +80,41 @@ export interface GuitarSongChord {
 }
 
 export interface GuitarSongPlan {
+  kind: "guitar";
   chords: GuitarSongChord[];
   totalMove: number;
   truncated: boolean;
 }
 
-function guitarTransition(a: Fingering, b: Fingering): { cost: number; held: number[] } {
+/** Movement cost between two guitar fingerings + the held string indices. */
+function guitarTransition(from: Fingering, to: Fingering): { cost: number; held: number[] } {
   let cost = 0;
   const held: number[] = [];
-  let aMin = Infinity;
-  let bMin = Infinity;
-  for (let s = 0; s < a.frets.length; s++) {
-    const fa = a.frets[s]!;
-    const fb = b.frets[s]!;
-    if (fa !== null && fb !== null) {
-      if (fa === fb) held.push(s);
-      cost += Math.abs(fa - fb);
-    } else if (fa !== null || fb !== null) {
+  let fromMinFret = Infinity;
+  let toMinFret = Infinity;
+  for (let stringIndex = 0; stringIndex < from.frets.length; stringIndex++) {
+    const fromFret = from.frets[stringIndex];
+    const toFret = to.frets[stringIndex];
+    if (fromFret !== null && toFret !== null) {
+      if (fromFret === toFret) held.push(stringIndex);
+      cost += Math.abs(fromFret - toFret);
+    } else if (fromFret !== null || toFret !== null) {
       cost += MUTE_CHANGE;
     }
-    if (fa !== null && fa > 0) aMin = Math.min(aMin, fa);
-    if (fb !== null && fb > 0) bMin = Math.min(bMin, fb);
+    if (fromFret !== null && fromFret > 0) fromMinFret = Math.min(fromMinFret, fromFret);
+    if (toFret !== null && toFret > 0) toMinFret = Math.min(toMinFret, toFret);
   }
-  if (aMin !== Infinity && bMin !== Infinity) cost += POSITION_WEIGHT * Math.abs(aMin - bMin);
+  if (fromMinFret !== Infinity && toMinFret !== Infinity) cost += POSITION_WEIGHT * Math.abs(fromMinFret - toMinFret);
   return { cost, held };
 }
 
-function guitarNodeCost(chord: ParsedChord, f: Fingering, tuning: number[]): number {
+/** 0 when the lowest sounding string matches the written bass, else `BASS_PENALTY`. */
+function guitarNodeCost(chord: ParsedChord, fingering: Fingering, tuning: number[]): number {
   if (chord.bass === null) return 0;
-  for (let s = 0; s < f.frets.length; s++) {
-    const fr = f.frets[s];
-    if (fr !== null) {
-      return ((tuning[s]! + fr) % SEMITONES) === chord.bass ? 0 : BASS_PENALTY;
+  for (let stringIndex = 0; stringIndex < fingering.frets.length; stringIndex++) {
+    const fret = fingering.frets[stringIndex];
+    if (fret !== null) {
+      return ((tuning[stringIndex] + fret) % SEMITONES) === chord.bass ? 0 : BASS_PENALTY;
     }
   }
   return BASS_PENALTY;
@@ -133,36 +136,36 @@ export function planGuitarSong(
 ): GuitarSongPlan | null {
   const budget = Math.max(1, Math.min(cap, SONG_CAP));
   let truncated = false;
-  const candidates = progression.map((c) => {
-    const r = findFingerings(c.pcs, tuning, maxFrets, span, budget);
-    if (r.truncated) truncated = true;
-    return r.fingerings;
+  const candidates = progression.map((chord) => {
+    const result = findFingerings(chord.pitchClasses, tuning, maxFrets, span, budget);
+    if (result.truncated) truncated = true;
+    return result.fingerings;
   });
   if (candidates.some((c) => c.length === 0)) return null;
 
   const path = bestPath(
     candidates,
-    (f, i) => guitarNodeCost(progression[i]!, f, tuning),
-    (a, b) => guitarTransition(a, b).cost,
+    (fingering, chordIndex) => guitarNodeCost(progression[chordIndex], fingering, tuning),
+    (from, to) => guitarTransition(from, to).cost,
   );
   if (!path) return null;
 
   const chords: GuitarSongChord[] = [];
   let totalMove = 0;
   for (let i = 0; i < path.path.length; i++) {
-    const f = path.path[i]!;
-    const prev = i > 0 ? path.path[i - 1]! : null;
-    const t = prev ? guitarTransition(prev, f) : { cost: 0, held: [] };
-    if (i > 0) totalMove += t.cost;
+    const fingering = path.path[i];
+    const previous = i > 0 ? path.path[i - 1] : null;
+    const transition = previous ? guitarTransition(previous, fingering) : { cost: 0, held: [] };
+    if (i > 0) totalMove += transition.cost;
     chords.push({
-      chord: progression[i]!,
-      fingering: f,
-      held: t.held,
-      move: t.cost,
-      bassMatches: guitarNodeCost(progression[i]!, f, tuning) === 0,
+      chord: progression[i],
+      fingering,
+      held: transition.held,
+      move: transition.cost,
+      bassMatches: guitarNodeCost(progression[i], fingering, tuning) === 0,
     });
   }
-  return { chords, totalMove, truncated };
+  return { kind: "guitar", chords, totalMove, truncated };
 }
 
 /* -------------------------------- piano ------------------------------ */
@@ -177,30 +180,33 @@ export interface PianoSongChord {
 }
 
 export interface PianoSongPlan {
+  kind: "piano";
   chords: PianoSongChord[];
   totalMove: number;
   truncated: boolean;
 }
 
-function pianoTransition(a: number[], b: number[]): { cost: number; held: number[] } {
-  const as = [...a].sort((x, y) => x - y);
-  const bs = [...b].sort((x, y) => x - y);
+/** Movement cost between two piano key sets + the held MIDI notes. */
+function pianoTransition(from: number[], to: number[]): { cost: number; held: number[] } {
+  const fromKeys = [...from].sort((x, y) => x - y);
+  const toKeys = [...to].sort((x, y) => x - y);
   const held: number[] = [];
   let cost = 0;
-  const n = Math.min(as.length, bs.length);
-  for (let i = 0; i < n; i++) {
-    const d = Math.abs(as[i]! - bs[i]!);
-    if (d === 0) held.push(as[i]!);
-    cost += d;
+  const paired = Math.min(fromKeys.length, toKeys.length);
+  for (let i = 0; i < paired; i++) {
+    const distance = Math.abs(fromKeys[i] - toKeys[i]);
+    if (distance === 0) held.push(fromKeys[i]);
+    cost += distance;
   }
-  cost += EXTRA_KEY_PENALTY * Math.abs(as.length - bs.length);
+  cost += EXTRA_KEY_PENALTY * Math.abs(fromKeys.length - toKeys.length);
   return { cost, held };
 }
 
+/** 0 when the lowest key matches the written bass, else `BASS_PENALTY`. */
 function pianoNodeCost(chord: ParsedChord, keys: number[]): number {
   if (chord.bass === null) return 0;
-  const lo = Math.min(...keys);
-  return ((lo % SEMITONES) + SEMITONES) % SEMITONES === chord.bass ? 0 : BASS_PENALTY;
+  const lowestKey = Math.min(...keys);
+  return ((lowestKey % SEMITONES) + SEMITONES) % SEMITONES === chord.bass ? 0 : BASS_PENALTY;
 }
 
 /**
@@ -216,40 +222,40 @@ export function planPianoSong(
 ): PianoSongPlan | null {
   const budget = Math.max(1, Math.min(cap, SONG_CAP));
   let truncated = false;
-  const candidates = progression.map((c) => {
-    const r = findPianoVoicings(c.pcs, low, high, reach, budget);
-    if (r.truncated) truncated = true;
-    return r.voicings;
+  const candidates = progression.map((chord) => {
+    const result = findPianoVoicings(chord.pitchClasses, low, high, reach, budget);
+    if (result.truncated) truncated = true;
+    return result.voicings;
   });
   if (candidates.some((c) => c.length === 0)) return null;
 
   const path = bestPath(
     candidates,
-    (v, i) => pianoNodeCost(progression[i]!, v.keys),
-    (a, b) => pianoTransition(a.keys, b.keys).cost,
+    (voicing, chordIndex) => pianoNodeCost(progression[chordIndex], voicing.keys),
+    (from, to) => pianoTransition(from.keys, to.keys).cost,
   );
   if (!path) return null;
 
   const chords: PianoSongChord[] = [];
   let totalMove = 0;
   for (let i = 0; i < path.path.length; i++) {
-    const v = path.path[i]!;
-    const prev = i > 0 ? path.path[i - 1]! : null;
-    const t = prev ? pianoTransition(prev.keys, v.keys) : { cost: 0, held: [] };
-    totalMove += t.cost;
+    const voicing = path.path[i];
+    const previous = i > 0 ? path.path[i - 1] : null;
+    const transition = previous ? pianoTransition(previous.keys, voicing.keys) : { cost: 0, held: [] };
+    totalMove += transition.cost;
     chords.push({
-      chord: progression[i]!,
-      voicing: v,
-      held: t.held,
-      move: t.cost,
-      bassMatches: pianoNodeCost(progression[i]!, v.keys) === 0,
+      chord: progression[i],
+      voicing,
+      held: transition.held,
+      move: transition.cost,
+      bassMatches: pianoNodeCost(progression[i], voicing.keys) === 0,
     });
   }
-  return { chords, totalMove, truncated };
+  return { kind: "piano", chords, totalMove, truncated };
 }
 
 /** Human-readable fallback names for the plan's chord display. */
-export function planChordLabel(c: ParsedChord): string {
-  const named = chordName(c.pcs);
-  return c.name === named.primary ? named.primary : `${c.name}  (${named.primary})`;
+export function planChordLabel(chord: ParsedChord): string {
+  const named = chordName(chord.pitchClasses);
+  return chord.name === named.primary ? named.primary : `${chord.name}  (${named.primary})`;
 }

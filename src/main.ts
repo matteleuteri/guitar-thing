@@ -21,7 +21,12 @@ import {
   type PianoSongChord,
 } from "./song.js";
 
-const DEFAULTPCS = new Set([0, 4, 7]); // C E G
+const DEFAULT_PCS = new Set([0, 4, 7]); // C E G
+
+/** Narrow the per-chord union by which plan kind produced it. */
+function isPianoChord(chord: GuitarSongChord | PianoSongChord): chord is PianoSongChord {
+  return "voicing" in chord;
+}
 
 document.addEventListener("DOMContentLoaded", () => {
   const noteGrid = document.getElementById("note-grid") as HTMLDivElement;
@@ -57,41 +62,41 @@ document.addEventListener("DOMContentLoaded", () => {
   const chordsTitle = document.getElementById("chords-title") as HTMLElement;
   const customTuning = document.getElementById("custom-tuning") as HTMLDetailsElement;
   const customStrings = Array.from(customTuning.querySelectorAll("input")) as HTMLInputElement[];
-  const selectedPcs = new Set<number>(DEFAULTPCS);
+  const selectedPitchClasses = new Set<number>(DEFAULT_PCS);
   const noteButtons: HTMLButtonElement[] = [];
 
   const refreshNoteButtons = () => {
-    for (let pc = 0; pc < noteButtons.length; pc++) {
-      const b = noteButtons[pc]!;
-      const on = selectedPcs.has(pc);
-      b.classList.toggle("selected", on);
-      b.style.background = on ? colorFor(pc) : "";
-      b.setAttribute("aria-pressed", String(on));
+    for (let pitchClass = 0; pitchClass < noteButtons.length; pitchClass++) {
+      const button = noteButtons[pitchClass];
+      const on = selectedPitchClasses.has(pitchClass);
+      button.classList.toggle("selected", on);
+      button.style.background = on ? colorFor(pitchClass) : "";
+      button.setAttribute("aria-pressed", String(on));
     }
   };
 
-  for (let pc = 0; pc < 12; pc++) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "note-btn";
-    b.textContent = noteLabels(pc);
-    b.title = noteLabels(pc);
-    b.addEventListener("click", () => {
-      if (selectedPcs.has(pc)) selectedPcs.delete(pc);
-      else selectedPcs.add(pc);
+  for (let pitchClass = 0; pitchClass < 12; pitchClass++) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "note-btn";
+    button.textContent = noteLabels(pitchClass);
+    button.title = noteLabels(pitchClass);
+    button.addEventListener("click", () => {
+      if (selectedPitchClasses.has(pitchClass)) selectedPitchClasses.delete(pitchClass);
+      else selectedPitchClasses.add(pitchClass);
       refreshNoteButtons();
       run();
     });
-    noteButtons.push(b);
-    noteGrid.appendChild(b);
+    noteButtons.push(button);
+    noteGrid.appendChild(button);
   }
   refreshNoteButtons();
 
-  for (const t of TUNINGS) {
-    const opt = document.createElement("option");
-    opt.value = t.id;
-    opt.textContent = t.label;
-    tuningSelect.appendChild(opt);
+  for (const tuning of TUNINGS) {
+    const option = document.createElement("option");
+    option.value = tuning.id;
+    option.textContent = tuning.label;
+    tuningSelect.appendChild(option);
   }
 
   tuningSelect.addEventListener("change", () => {
@@ -102,8 +107,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const spans: Record<string, number> = { ...SPAN_DEFAULTS };
 
   const saveSpan = (mode: string) => {
-    const n = parseInt(spanInput.value, 10);
-    if (Number.isFinite(n)) spans[mode] = Math.min(24, Math.max(1, n));
+    const value = parseInt(spanInput.value, 10);
+    if (Number.isFinite(value)) spans[mode] = Math.min(24, Math.max(1, value));
   };
 
   let currentInstrument = instrumentSelect.value;
@@ -114,7 +119,7 @@ document.addEventListener("DOMContentLoaded", () => {
     guitarOnly.hidden = mode !== "guitar";
     pianoOnly.hidden = mode !== "piano";
     spanLabel.textContent = mode === "piano" ? "Max span (keys)" : "Max span (frets)";
-    spanInput.value = String(spans[mode] ?? SPAN_DEFAULTS[mode]!);
+    spanInput.value = String(spans[mode] ?? SPAN_DEFAULTS[mode]);
     currentInstrument = mode;
     run();
   }, { passive: false });
@@ -124,15 +129,15 @@ document.addEventListener("DOMContentLoaded", () => {
   // Top-level strum speed: lives on the shared config object so `playVoicing`
   // picks it up on the next click. 0 = all strings strike together.
   const applyStrum = () => {
-    const n = parseInt(strumInput.value, 10);
-    if (Number.isFinite(n)) DEFAULT_CONFIG.strum.guitarMs = Math.min(400, Math.max(0, n));
+    const ms = parseInt(strumInput.value, 10);
+    if (Number.isFinite(ms)) DEFAULT_CONFIG.strum.guitarMs = Math.min(400, Math.max(0, ms));
   };
   strumInput.addEventListener("input", applyStrum);
   strumInput.addEventListener("change", applyStrum);
 
   const getTuning = (): number[] => {
-    const t = TUNINGS.find((x) => x.id === tuningSelect.value)!;
-    if (t.id !== "custom") return t.midi;
+    const tuning = TUNINGS.find((x) => x.id === tuningSelect.value)!;
+    if (tuning.id !== "custom") return tuning.midi;
     return customStrings.map((input, i) => parseStringMidi(input.value, i));
   };
 
@@ -141,33 +146,33 @@ document.addEventListener("DOMContentLoaded", () => {
     error.textContent = msg ?? "";
   };
 
-  function renderLegend(pcs: number[]) {
+  function renderLegend(pitchClasses: number[]) {
     legend.replaceChildren();
-    for (const pc of pcs) {
+    for (const pitchClass of pitchClasses) {
       const item = el("span", "legend-item");
-      const sw = el("span", "legend-swatch");
-      sw.style.background = colorFor(pc);
-      item.appendChild(sw);
-      item.appendChild(el("span", "", noteName(pc)));
+      const swatch = el("span", "legend-swatch");
+      swatch.style.background = colorFor(pitchClass);
+      item.appendChild(swatch);
+      item.appendChild(el("span", "", noteName(pitchClass)));
       legend.appendChild(item);
     }
   }
 
   function renderChordCard(
-    chordPcs: number[],
+    chordPitchClasses: number[],
     fingerings: Fingering[],
     truncated: boolean,
     tuning: number[],
   ): HTMLElement {
     const card = el("div", "chord-card");
-    const name = chordName(chordPcs);
-    const h = el("h3", "", name.primary);
+    const name = chordName(chordPitchClasses);
+    const heading = el("h3", "", name.primary);
     if (name.alternatives.length > 0) {
-      h.appendChild(el("span", "muted", `  · also ${name.alternatives.join(", ")}`));
+      heading.appendChild(el("span", "muted", `  · also ${name.alternatives.join(", ")}`));
     }
-    card.appendChild(h);
+    card.appendChild(heading);
     card.appendChild(
-      el("div", "chord-notes", `${chordPcs.map(noteName).join(" ")}  (${chordPcs.length} notes)`),
+      el("div", "chord-notes", `${chordPitchClasses.map(noteName).join(" ")}  (${chordPitchClasses.length} notes)`),
     );
 
     if (fingerings.length === 0) {
@@ -181,27 +186,26 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const grid = el("div", "diagrams");
     for (let i = 0; i < fingerings.length; i++) {
-      const f = fingerings[i]!;
-      grid.appendChild(renderChordDiagram(f, tuning, noteName, i + 1));
+      grid.appendChild(renderChordDiagram(fingerings[i], tuning, noteName, i + 1));
     }
     card.appendChild(grid);
     return card;
   }
 
   function renderPianoCard(
-    chordPcs: number[],
+    chordPitchClasses: number[],
     voicings: PianoVoicing[],
     truncated: boolean,
   ): HTMLElement {
     const card = el("div", "chord-card");
-    const name = chordName(chordPcs);
-    const h = el("h3", "", name.primary);
+    const name = chordName(chordPitchClasses);
+    const heading = el("h3", "", name.primary);
     if (name.alternatives.length > 0) {
-      h.appendChild(el("span", "muted", `  · also ${name.alternatives.join(", ")}`));
+      heading.appendChild(el("span", "muted", `  · also ${name.alternatives.join(", ")}`));
     }
-    card.appendChild(h);
+    card.appendChild(heading);
     card.appendChild(
-      el("div", "chord-notes", `${chordPcs.map(noteName).join(" ")}  (${chordPcs.length} notes)`),
+      el("div", "chord-notes", `${chordPitchClasses.map(noteName).join(" ")}  (${chordPitchClasses.length} notes)`),
     );
 
     if (voicings.length === 0) {
@@ -211,8 +215,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const grid = el("div", "diagrams");
     for (let i = 0; i < voicings.length; i++) {
-      const v = voicings[i]!;
-      grid.appendChild(renderPianoVoicing(v.keys, noteName, i + 1));
+      grid.appendChild(renderPianoVoicing(voicings[i].keys, noteName, i + 1));
     }
     card.appendChild(
       el("div", "chord-count", `${voicings.length} voicing${voicings.length === 1 ? "" : "s"}${truncated ? " (truncated)" : ""}`),
@@ -229,7 +232,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Whole-song playback: queue each chord's voicing `gapMs` apart.
   let songTimers: number[] = [];
   const cancelSong = () => {
-    for (const t of songTimers) clearTimeout(t);
+    for (const timer of songTimers) clearTimeout(timer);
     songTimers = [];
     stopAudio();
   };
@@ -237,7 +240,7 @@ document.addEventListener("DOMContentLoaded", () => {
   modeSelect.addEventListener("change", () => run());
 
   interface Params {
-    pcs: number[];
+    pitchClasses: number[];
     span: number;
     cap: number;
     tuning: number[];
@@ -247,17 +250,17 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function readParams(): Params {
-    const span = Math.min(24, Math.max(1, parseInt(spanInput.value, 10) || SPAN_DEFAULTS[instrumentSelect.value]!));
+    const span = Math.min(24, Math.max(1, parseInt(spanInput.value, 10) || SPAN_DEFAULTS[instrumentSelect.value]));
     const cap = Math.max(1, parseInt(capInput.value, 10) || 500);
-    const pcs = [...selectedPcs].sort((a, b) => a - b);
+    const pitchClasses = [...selectedPitchClasses].sort((a, b) => a - b);
     if (instrumentSelect.value === "piano") {
       const pianoLow = Math.min(108, Math.max(21, parseInt(pianoLowInput.value, 10) || 48));
       const pianoHigh = Math.min(108, Math.max(21, parseInt(pianoHighInput.value, 10) || 84));
       if (pianoLow >= pianoHigh) throw new Error("Lowest key must be below the highest key.");
-      return { pcs, span, cap, tuning: TUNINGS[0]!.midi, fretCount: 15, pianoLow, pianoHigh };
+      return { pitchClasses, span, cap, tuning: TUNINGS[0].midi, fretCount: 15, pianoLow, pianoHigh };
     }
     return {
-      pcs,
+      pitchClasses,
       span,
       cap,
       tuning: getTuning(),
@@ -267,8 +270,9 @@ document.addEventListener("DOMContentLoaded", () => {
     };
   }
 
-  function runSong(p: Params) {
-    const isPiano = instrumentSelect.value === "piano";
+  const round1 = (n: number) => Math.round(n * 10) / 10;
+
+  function runSong(params: Params) {
     chordsTitle.textContent = "Song arrangement";
 
     let progression: ParsedChord[];
@@ -281,9 +285,9 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    const plan = isPiano
-      ? planPianoSong(progression, p.pianoLow, p.pianoHigh, p.span, p.cap)
-      : planGuitarSong(progression, p.tuning, p.fretCount, p.span, p.cap);
+    const plan = instrumentSelect.value === "piano"
+      ? planPianoSong(progression, params.pianoLow, params.pianoHigh, params.span, params.cap)
+      : planGuitarSong(progression, params.tuning, params.fretCount, params.span, params.cap);
     if (!plan) {
       chordSummary.textContent = "(a chord has no voicing within the chosen span/reach)";
       return;
@@ -291,7 +295,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     chordSummary.textContent =
       `· ${plan.chords.length} chord${plan.chords.length === 1 ? "" : "s"} · ` +
-      `total move ${Math.round(plan.totalMove * 10) / 10}` +
+      `total move ${round1(plan.totalMove)}` +
       (plan.truncated ? " (per-chord candidates capped)" : "");
 
     songActions.replaceChildren();
@@ -299,50 +303,52 @@ document.addEventListener("DOMContentLoaded", () => {
     playAll.title = "Strums every chord in sequence, one per chord-gap period";
     playAll.addEventListener("click", () => {
       cancelSong();
-      const chords = plan.chords;
-      for (let i = 0; i < chords.length; i++) {
-        songTimers.push(setTimeout(() => {
-          const c = chords[i]!;
-          if (isPiano) playNotes((c as PianoSongChord).voicing.keys, true);
-          else playVoicing((c as GuitarSongChord).fingering.frets, p.tuning);
-        }, i * gapMs));
+      if (plan.kind === "piano") {
+        plan.chords.forEach((chord, index) => {
+          songTimers.push(setTimeout(() => playNotes(chord.voicing.keys, true), index * gapMs));
+        });
+      } else {
+        plan.chords.forEach((chord, index) => {
+          songTimers.push(setTimeout(() => playVoicing(chord.fingering.frets, params.tuning), index * gapMs));
+        });
       }
     });
     songActions.appendChild(playAll);
 
     const nameOf = noteName;
-    plan.chords.forEach((c, i) => {
+    plan.chords.forEach((chord, index) => {
       const card = el("div", "chord-card song-card");
-      const h = el("h3", "", planChordLabel(c.chord));
-      if (c.chord.bass !== null) h.appendChild(el("span", "muted", `  · ${noteName(c.chord.bass)} bass`));
-      card.appendChild(h);
+      const heading = el("h3", "", planChordLabel(chord.chord));
+      if (chord.chord.bass !== null) heading.appendChild(el("span", "muted", `  · ${noteName(chord.chord.bass)} bass`));
+      card.appendChild(heading);
 
       const grid = el("div", "diagrams");
-      if (isPiano) {
-        const pc = c as PianoSongChord;
-        grid.appendChild(renderPianoVoicing(pc.voicing.keys, nameOf, i + 1, { held: pc.held }));
+      const bits: string[] = [];
+      if (isPianoChord(chord)) {
+        grid.appendChild(renderPianoVoicing(chord.voicing.keys, nameOf, index + 1, { held: chord.held }));
+        if (index > 0) {
+          bits.push(`move ${round1(chord.move)}`);
+          if (chord.held.length > 0) bits.push(`hold ${chord.held.map(midiName).join(" ")}`);
+        }
       } else {
-        const gc = c as GuitarSongChord;
-        const heldArr = new Array<boolean>(p.tuning.length).fill(false);
-        for (const s of gc.held) heldArr[s] = true;
-        grid.appendChild(renderChordDiagram(gc.fingering, p.tuning, nameOf, i + 1, { held: heldArr }));
+        const heldStrings = new Array<boolean>(params.tuning.length).fill(false);
+        for (const stringIndex of chord.held) heldStrings[stringIndex] = true;
+        grid.appendChild(renderChordDiagram(chord.fingering, params.tuning, nameOf, index + 1, { held: heldStrings }));
+        if (index > 0) {
+          bits.push(`move ${round1(chord.move)}`);
+          if (chord.held.length > 0) {
+            bits.push(`hold string${chord.held.length > 1 ? "s" : ""} ${chord.held.map((s) => s + 1).join(", ")}`);
+          }
+        }
       }
       card.appendChild(grid);
 
-      const moveLine = el("div", "song-move");
-      const bits: string[] = [];
-      if (i > 0) {
-        bits.push(`move ${Math.round(c.move * 10) / 10}`);
-        if (c.held.length > 0) {
-          bits.push(isPiano
-            ? `hold ${(c as PianoSongChord).held.map(midiName).join(" ")}`
-            : `hold string${c.held.length > 1 ? "s" : ""} ${(c as GuitarSongChord).held.map((s) => s + 1).join(", ")}`);
-        }
-        if (c.chord.bass !== null && !c.bassMatches) bits.push("lowest note ≠ bass");
-      } else if (c.chord.bass !== null && !c.bassMatches) {
-        bits.push("lowest note misses the written bass");
+      if (chord.chord.bass !== null && !chord.bassMatches) {
+        bits.push(index === 0 ? "lowest note misses the written bass" : "lowest note ≠ bass");
       }
-      moveLine.textContent = i === 0 ? `start here${bits.length ? ` · ${bits.join(" · ")}` : ""}` : bits.join(" · ");
+
+      const moveLine = el("div", "song-move");
+      moveLine.textContent = index === 0 ? `start here${bits.length ? ` · ${bits.join(" · ")}` : ""}` : bits.join(" · ");
       card.appendChild(moveLine);
       chordList.appendChild(card);
     });
@@ -367,42 +373,42 @@ document.addEventListener("DOMContentLoaded", () => {
     positionsTitle.textContent = isPiano ? "Keyboard positions" : "Fretboard positions";
     chordsTitle.textContent = isSong ? "Song arrangement" : isPiano ? "Chord voicings" : "Chord fingerings";
 
-    let p: Params;
+    let params: Params;
     try {
-      p = readParams();
+      params = readParams();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       return;
     }
 
     if (isSong) {
-      runSong(p);
+      runSong(params);
       return;
     }
 
     const nameOf = noteName;
     legend.replaceChildren();
-    renderLegend(p.pcs);
+    renderLegend(params.pitchClasses);
 
-    if (p.pcs.length < 2) {
+    if (params.pitchClasses.length < 2) {
       chordSummary.textContent = "(need at least 2 notes for chords)";
       return;
     }
 
     if (isPiano) {
-      posBoard.replaceChildren(renderPiano(p.pianoLow, p.pianoHigh, p.pcs, nameOf));
-      const { voicings, truncated } = findPianoVoicings(p.pcs, p.pianoLow, p.pianoHigh, p.span, p.cap);
-      chordList.appendChild(renderPianoCard(p.pcs, voicings, truncated));
-      chordSummary.textContent = `· ${voicings.length} voicing${voicings.length === 1 ? "" : "s"} for ${chordName(p.pcs).primary}`;
+      posBoard.replaceChildren(renderPiano(params.pianoLow, params.pianoHigh, params.pitchClasses, nameOf));
+      const { voicings, truncated } = findPianoVoicings(params.pitchClasses, params.pianoLow, params.pianoHigh, params.span, params.cap);
+      chordList.appendChild(renderPianoCard(params.pitchClasses, voicings, truncated));
+      chordSummary.textContent = `· ${voicings.length} voicing${voicings.length === 1 ? "" : "s"} for ${chordName(params.pitchClasses).primary}`;
       return;
     }
 
-    posBoard.replaceChildren(renderPositions(p.tuning, p.pcs, p.fretCount, nameOf));
+    posBoard.replaceChildren(renderPositions(params.tuning, params.pitchClasses, params.fretCount, nameOf));
 
     // Chord list: every provided note must be in the chord voicing.
-    const { fingerings, truncated } = findFingerings(p.pcs, p.tuning, p.fretCount, p.span, p.cap);
-    chordList.appendChild(renderChordCard(p.pcs, fingerings, truncated, p.tuning));
-    chordSummary.textContent = `· ${fingerings.length} fingering${fingerings.length === 1 ? "" : "s"} for ${chordName(p.pcs).primary}`;
+    const { fingerings, truncated } = findFingerings(params.pitchClasses, params.tuning, params.fretCount, params.span, params.cap);
+    chordList.appendChild(renderChordCard(params.pitchClasses, fingerings, truncated, params.tuning));
+    chordSummary.textContent = `· ${fingerings.length} fingering${fingerings.length === 1 ? "" : "s"} for ${chordName(params.pitchClasses).primary}`;
   }
 
   form.addEventListener("submit", (e) => {

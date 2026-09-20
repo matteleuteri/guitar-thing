@@ -132,7 +132,7 @@ for (const g of gates) {
 check(gatedFromZero === gates.length, `every voice is silent from t=0 (${gatedFromZero}/${gates.length}) — no simultaneous leak`);
 
 // 2. Spread over time, not stacked.
-const starts = evs.map((e) => e.t).sort((a, b) => a - b);
+const starts = evs.map((e) => e.time).sort((a, b) => a - b);
 const span = starts[starts.length - 1] - starts[0];
 check(span > 0.4, `voices are strummed over time (span ${(span * 1000).toFixed(0)}ms > 400ms)`);
 let monotonic = true;

@@ -9,8 +9,8 @@ export const FLAT_NAMES = [
 ] as const;
 
 /** Combined sharp/flat label for the note buttons, e.g. "C#/Db" or "C". */
-export function noteLabels(pc: number): string {
-  const i = ((pc % SEMITONES) + SEMITONES) % SEMITONES;
+export function noteLabels(pitchClass: number): string {
+  const i = ((pitchClass % SEMITONES) + SEMITONES) % SEMITONES;
   const s = SHARP_NAMES[i]!;
   const f = FLAT_NAMES[i]!;
   return s === f ? s : `${s}/${f}`;
@@ -18,45 +18,49 @@ export function noteLabels(pc: number): string {
 
 const ALIASES = new Map<string, number>();
 SHARP_NAMES.forEach((n, i) => ALIASES.set(n.toLowerCase(), i));
-for (const [alias, pc] of [
+for (const [alias, pitchClass] of [
   ["db", 1], ["eb", 3], ["gb", 6], ["ab", 8], ["bb", 10],
 ] as [string, number][]) {
-  ALIASES.set(alias, pc);
+  ALIASES.set(alias, pitchClass);
 }
 
-export function noteName(pc: number): string {
-  return SHARP_NAMES[((pc % SEMITONES) + SEMITONES) % SEMITONES];
+/** Pitch class → sharp-spelled note name, e.g. 9 → "A". */
+export function noteName(pitchClass: number): string {
+  return SHARP_NAMES[((pitchClass % SEMITONES) + SEMITONES) % SEMITONES];
 }
 
+/** Parse a free-text list of notes (space/comma/semicolon/bar) into unique pitch classes. */
 export function parseNotes(input: string): number[] {
   const tokens = input.split(/[\s,;|]+/).filter(Boolean);
   if (tokens.length === 0) throw new Error("Enter at least one note.");
-  const out: number[] = [];
+  const found: number[] = [];
   for (const raw of tokens) {
-    const pc = ALIASES.get(raw.toLowerCase());
-    if (pc === undefined) throw new Error(`Unknown note "${raw}".`);
-    if (!out.includes(pc)) out.push(pc);
+    const pitchClass = ALIASES.get(raw.toLowerCase());
+    if (pitchClass === undefined) throw new Error(`Unknown note "${raw}".`);
+    if (!found.includes(pitchClass)) found.push(pitchClass);
   }
-  return out;
+  return found;
 }
 
 const DEFAULT_OCTAVES = [2, 2, 3, 3, 3, 4];
 
+/** Parse "Db3" into a MIDI note; an omitted octave uses the per-string default. */
 export function parseStringMidi(value: string, index: number): number {
-  const m = /^([A-Ga-g])([#bB]?)\s*(\d+)?$/.exec(value.trim());
-  if (!m) throw new Error(`Bad string note "${value}". Use e.g. E2, A2, Db3.`);
-  const letter = m[1].toUpperCase();
-  let pc = ALIASES.get(letter.toLowerCase())!;
-  if (m[2] === "#") pc = (pc + 1) % SEMITONES;
-  else if (m[2] === "b" || m[2] === "B") pc = (pc - 1 + SEMITONES) % SEMITONES;
-  const octave = m[3] ? parseInt(m[3], 10) : DEFAULT_OCTAVES[index] ?? 2;
-  return (octave + 1) * SEMITONES + pc;
+  const match = /^([A-Ga-g])([#bB]?)\s*(\d+)?$/.exec(value.trim());
+  if (!match) throw new Error(`Bad string note "${value}". Use e.g. E2, A2, Db3.`);
+  const letter = match[1]!.toUpperCase();
+  let pitchClass = ALIASES.get(letter.toLowerCase())!;
+  if (match[2] === "#") pitchClass = (pitchClass + 1) % SEMITONES;
+  else if (match[2] === "b" || match[2] === "B") pitchClass = (pitchClass - 1 + SEMITONES) % SEMITONES;
+  const octave = match[3] ? parseInt(match[3], 10) : DEFAULT_OCTAVES[index] ?? 2;
+  return (octave + 1) * SEMITONES + pitchClass;
 }
 
+/** MIDI note number → name with octave, e.g. 57 → "A3". */
 export function midiName(midi: number): string {
-  const pc = ((midi % SEMITONES) + SEMITONES) % SEMITONES;
+  const pitchClass = ((midi % SEMITONES) + SEMITONES) % SEMITONES;
   const octave = Math.floor(midi / SEMITONES) - 1;
-  return `${noteName(pc)}${octave}`;
+  return `${noteName(pitchClass)}${octave}`;
 }
 
 export interface Tuning {
@@ -65,6 +69,7 @@ export interface Tuning {
   midi: number[];
 }
 
+/** Built-in tunings (index 0 = thickest string) plus "Custom…". */
 export const TUNINGS: Tuning[] = [
   { id: "standard", label: "Standard E A D G B E", midi: [40, 45, 50, 55, 59, 64] },
   { id: "dropD", label: "Drop D D A D G B E", midi: [38, 45, 50, 55, 59, 64] },
@@ -81,6 +86,7 @@ export interface ChordPattern {
   name: string;
 }
 
+/** Interval patterns for chord naming; display suffix ("" = major). */
 const CHORD_PATTERNS: ChordPattern[] = [
   { intervals: [0, 1, 4, 7, 10], name: "7b9" },
   { intervals: [0, 3, 4, 7, 10], name: "7#9" },
@@ -127,8 +133,9 @@ function sameIntervals(a: number[], b: number[]): boolean {
   return true;
 }
 
-export function chordName(pcs: number[]): ChordName {
-  const sorted = [...pcs].sort((a, b) => a - b);
+/** Identify a chord's name from its pitch classes; prefers the lowest as root. */
+export function chordName(pitchClasses: number[]): ChordName {
+  const sorted = [...pitchClasses].sort((a, b) => a - b);
   const primary = sorted.map(noteName).join(" ");
   if (sorted.length < 3) return { primary, alternatives: [] };
 
@@ -136,9 +143,9 @@ export function chordName(pcs: number[]): ChordName {
   for (const root of sorted) {
     const intervals = [...new Set(sorted.map((p) => (p - root + SEMITONES) % SEMITONES))]
       .sort((a, b) => a - b);
-    for (const pat of CHORD_PATTERNS) {
-      if (sameIntervals(pat.intervals, intervals)) {
-        candidates.push({ root, name: `${noteName(root)}${pat.name}` });
+    for (const pattern of CHORD_PATTERNS) {
+      if (sameIntervals(pattern.intervals, intervals)) {
+        candidates.push({ root, name: `${noteName(root)}${pattern.name}` });
       }
     }
   }
@@ -160,7 +167,7 @@ export interface ParsedChord {
   /** Bass pitch class from a slash chord ("C/G" -> G), or null. */
   bass: number | null;
   /** Full pitch-class set, sorted ascending. */
-  pcs: number[];
+  pitchClasses: number[];
 }
 
 const SUFFIX_INTERVALS = new Map<string, number[]>(
@@ -180,29 +187,29 @@ function canonicalSuffix(raw: string): string {
 
 const ROOT_ALIASES = new Map<string, number>();
 SHARP_NAMES.forEach((n, i) => ROOT_ALIASES.set(n.toLowerCase(), i));
-for (const [alias, pc] of [
+for (const [alias, pitchClass] of [
   ["ab", 8], ["bb", 10], ["db", 1], ["eb", 3], ["gb", 6],
 ] as [string, number][]) {
-  ROOT_ALIASES.set(alias, pc);
+  ROOT_ALIASES.set(alias, pitchClass);
 }
 
 function parseRootSuffix(main: string): { root: number; suffix: string } | null {
   const letter = main.charAt(0).toLowerCase();
   let root = ROOT_ALIASES.get(letter);
   if (root === undefined) return null;
-  const acc = main.charAt(1);
-  if (acc === "#") { root = (root + 1) % SEMITONES; return { root, suffix: main.slice(2) }; }
-  if (acc === "b") { root = (root - 1 + SEMITONES) % SEMITONES; return { root, suffix: main.slice(2) }; }
+  const accidental = main.charAt(1);
+  if (accidental === "#") { root = (root + 1) % SEMITONES; return { root, suffix: main.slice(2) }; }
+  if (accidental === "b") { root = (root - 1 + SEMITONES) % SEMITONES; return { root, suffix: main.slice(2) }; }
   return { root, suffix: main.slice(1) };
 }
 
-function parseBassPc(token: string): number | null {
-  const m = /^([A-Ga-g])([#b]?)$/.exec(token.trim());
-  if (!m) return null;
-  let pc = ROOT_ALIASES.get(m[1].toLowerCase())!;
-  if (m[2] === "#") pc = (pc + 1) % SEMITONES;
-  else if (m[2] === "b") pc = (pc - 1 + SEMITONES) % SEMITONES;
-  return pc;
+function parseBassPitchClass(token: string): number | null {
+  const match = /^([A-Ga-g])([#b]?)$/.exec(token.trim());
+  if (!match) return null;
+  let pitchClass = ROOT_ALIASES.get(match[1]!.toLowerCase())!;
+  if (match[2] === "#") pitchClass = (pitchClass + 1) % SEMITONES;
+  else if (match[2] === "b") pitchClass = (pitchClass - 1 + SEMITONES) % SEMITONES;
+  return pitchClass;
 }
 
 /**
@@ -219,11 +226,11 @@ export function parseChord(input: string): ParsedChord {
   const parts = token.split("/");
   if (parts.length > 1) {
     for (let k = parts.length - 1; k >= 1; k--) {
-      const candMain = parts.slice(0, k).join("/");
-      const candBass = parseBassPc(parts.slice(k).join("/"));
-      if (parseRootSuffix(candMain) && candBass !== null) {
-        main = candMain;
-        bass = candBass;
+      const candidateMain = parts.slice(0, k).join("/");
+      const candidateBass = parseBassPitchClass(parts.slice(k).join("/"));
+      if (parseRootSuffix(candidateMain) && candidateBass !== null) {
+        main = candidateMain;
+        bass = candidateBass;
         break;
       }
     }
@@ -233,6 +240,7 @@ export function parseChord(input: string): ParsedChord {
   if (!parsed) throw new Error(`Unknown chord "${token}".`);
   const intervals = SUFFIX_INTERVALS.get(canonicalSuffix(parsed.suffix));
   if (intervals === undefined) throw new Error(`Unknown chord "${token}".`);
-  const pcs = [...new Set(intervals.map((i) => (parsed.root + i) % SEMITONES))].sort((a, b) => a - b);
-  return { name: token, root: parsed.root, bass, pcs };
+  const pitchClasses = [...new Set(intervals.map((i) => (parsed.root + i) % SEMITONES))]
+    .sort((a, b) => a - b);
+  return { name: token, root: parsed.root, bass, pitchClasses };
 }

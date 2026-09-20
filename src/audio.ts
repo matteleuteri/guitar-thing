@@ -9,7 +9,7 @@ import { buildSharedGraph, type SharedGraph } from "./synth/shared.js";
 
 const NOTE_START = 0.03;
 
-let ctx: AudioContext | null = null;
+let context: AudioContext | null = null;
 let graph: SharedGraph | null = null;
 let workletReady: Promise<void> | null = null;
 
@@ -26,16 +26,16 @@ function midiToFreq(midi: number): number {
   return 440 * Math.pow(2, (midi - 69) / 12);
 }
 
-function clamp01(v: number): number {
-  return Math.min(1, Math.max(0, v));
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
 }
 
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
+function lerp(a: number, b: number, position: number): number {
+  return a + (b - a) * position;
 }
 
-function ringSeconds(freq: number, cfg: PluckAudioConfig): number {
-  return Math.max(0.8, (cfg.ring.baseMs - (cfg.ring.perKHzMs * freq) / 1000) / 1000);
+function ringSeconds(freq: number, config: PluckAudioConfig): number {
+  return Math.max(0.8, (config.ring.baseMs - (config.ring.perKHzMs * freq) / 1000) / 1000);
 }
 
 function workletUrl(): URL {
@@ -44,15 +44,15 @@ function workletUrl(): URL {
 
 /** Create the context + shared graph once; load the worklet module once. */
 function ensure(): Promise<void> {
-  if (!ctx) {
-    ctx = new AudioContext();
-    ctx.resume().catch(() => undefined);
-    graph = buildSharedGraph(ctx, DEFAULT_CONFIG);
-  } else if (ctx.state === "suspended") {
-    ctx.resume().catch(() => undefined);
+  if (!context) {
+    context = new AudioContext();
+    context.resume().catch(() => undefined);
+    graph = buildSharedGraph(context, DEFAULT_CONFIG);
+  } else if (context.state === "suspended") {
+    context.resume().catch(() => undefined);
   }
   if (!workletReady) {
-    workletReady = ctx.audioWorklet.addModule(workletUrl().href).catch((err) => {
+    workletReady = context.audioWorklet.addModule(workletUrl().href).catch((err) => {
       workletReady = null;
       throw err;
     });
@@ -61,11 +61,11 @@ function ensure(): Promise<void> {
 }
 
 /** Humanize: random detune (cents) and a random start offset (ms). */
-function humanize(freq: number, cfg: PluckAudioConfig): { freq: number; jitter: number } {
-  const detune = (Math.random() * 2 - 1) * cfg.micro.detuneCents;
+function humanize(freq: number, config: PluckAudioConfig): { freq: number; jitter: number } {
+  const detune = (Math.random() * 2 - 1) * config.micro.detuneCents;
   return {
     freq: freq * Math.pow(2, detune / 1200),
-    jitter: (Math.random() * cfg.micro.jitterMs) / 1000,
+    jitter: (Math.random() * config.micro.jitterMs) / 1000,
   };
 }
 
@@ -112,63 +112,63 @@ interface VoiceParams {
   eq?: { lowpassHz?: number; peakHz?: number; peakGainDb?: number; peakQ?: number };
 }
 
-/** One plucked string at `t`. */
-function startVoice(freq: number, t: number, p: VoiceParams, cfg: PluckAudioConfig): void {
-  if (!ctx || !graph) return;
-  const { freq: hz, jitter } = humanize(freq, cfg);
-  const start = t + jitter;
+/** One plucked string at `time`. */
+function startVoice(frequency: number, time: number, params: VoiceParams, config: PluckAudioConfig): void {
+  if (!context || !graph) return;
+  const { freq: hz, jitter } = humanize(frequency, config);
+  const start = time + jitter;
   recordDebugEvent({
     kind: "voice",
-    t: start,
+    time: start,
     freq: hz,
-    peak: p.peak,
-    pan: p.pan,
-    role: p.role,
-    brightness: p.brightness,
-    damping: p.damping,
-    sustain: p.sustain,
-    pick: p.pick,
-    pickBright: p.pickBright ?? cfg.attack.pickBright,
-    pickDecayMs: p.pickDecayMs ?? cfg.attack.pickMs,
-    attackMs: p.attackMs,
-    decay: p.decay ?? 0.25,
+    peak: params.peak,
+    pan: params.pan,
+    role: params.role,
+    brightness: params.brightness,
+    damping: params.damping,
+    sustain: params.sustain,
+    pick: params.pick,
+    pickBright: params.pickBright ?? config.attack.pickBright,
+    pickDecayMs: params.pickDecayMs ?? config.attack.pickMs,
+    attackMs: params.attackMs,
+    decay: params.decay ?? 0.25,
   });
 
-  const node = new AudioWorkletNode(ctx, "pluck-string", {
+  const node = new AudioWorkletNode(context, "pluck-string", {
     processorOptions: {
       freq: hz,
-      sustain: p.sustain,
-      brightness: p.brightness,
-      damping: p.damping,
-      pickLevel: p.pick,
-      pickBright: p.pickBright ?? cfg.attack.pickBright,
-      pickDecayMs: p.pickDecayMs ?? cfg.attack.pickMs,
-      scoopCents: p.scoopCents,
-      scoopMs: cfg.scoop.ms,
-      pickPos: p.pickPos ?? 0.2,
-      decay: p.decay ?? 0.25,
-      ringFrames: Math.floor(ctx.sampleRate * ringSeconds(hz, cfg)),
+      sustain: params.sustain,
+      brightness: params.brightness,
+      damping: params.damping,
+      pickLevel: params.pick,
+      pickBright: params.pickBright ?? config.attack.pickBright,
+      pickDecayMs: params.pickDecayMs ?? config.attack.pickMs,
+      scoopCents: params.scoopCents,
+      scoopMs: config.scoop.ms,
+      pickPos: params.pickPos ?? 0.2,
+      decay: params.decay ?? 0.25,
+      ringFrames: Math.floor(context.sampleRate * ringSeconds(hz, config)),
     },
   });
 
   // Each string gets its own pickup-style tone EQ before the volume stage,
   // so it rings with a genuinely different color — not just a brightness knob.
   let tail: AudioNode = node;
-  if (p.eq) {
-    if (p.eq.lowpassHz) {
-      const f = ctx.createBiquadFilter();
+  if (params.eq) {
+    if (params.eq.lowpassHz) {
+      const f = context.createBiquadFilter();
       f.type = "lowpass";
-      f.frequency.value = p.eq.lowpassHz;
+      f.frequency.value = params.eq.lowpassHz;
       f.Q.value = 0.7;
       tail.connect(f);
       tail = f;
     }
-    if (p.eq.peakHz) {
-      const f = ctx.createBiquadFilter();
+    if (params.eq.peakHz) {
+      const f = context.createBiquadFilter();
       f.type = "peaking";
-      f.frequency.value = p.eq.peakHz;
-      f.gain.value = p.eq.peakGainDb ?? 0;
-      f.Q.value = p.eq.peakQ ?? 1;
+      f.frequency.value = params.eq.peakHz;
+      f.gain.value = params.eq.peakGainDb ?? 0;
+      f.Q.value = params.eq.peakQ ?? 1;
       tail.connect(f);
       tail = f;
     }
@@ -180,20 +180,20 @@ function startVoice(freq: number, t: number, p: VoiceParams, cfg: PluckAudioConf
   // sounds the moment it is connected — so without zeroing the gain from the
   // very start, every voice leaks at full volume immediately and the whole
   // strum collapses into one simultaneous pluck. Hold silence until `start`.
-  const g = ctx.createGain();
-  g.gain.setValueAtTime(0.0001, 0);
-  g.gain.setValueAtTime(0.0001, start);
-  g.gain.exponentialRampToValueAtTime(Math.max(0.02, p.peak), start + Math.max(0.0002, p.attackMs / 1000));
-  tail.connect(g);
+  const gate = context.createGain();
+  gate.gain.setValueAtTime(0.0001, 0);
+  gate.gain.setValueAtTime(0.0001, start);
+  gate.gain.exponentialRampToValueAtTime(Math.max(0.02, params.peak), start + Math.max(0.0002, params.attackMs / 1000));
+  tail.connect(gate);
   // Pan spreads the strings across the stereo field (0 = center, e.g. piano).
-  const panner = ctx.createStereoPanner();
-  panner.pan.value = p.pan;
-  g.connect(panner);
+  const panner = context.createStereoPanner();
+  panner.pan.value = params.pan;
+  gate.connect(panner);
   panner.connect(graph.voiceIn);
 
   const voice = { node, timer: 0 } as Voice;
   live.add(voice);
-  voice.timer = setTimeout(() => freeVoice(voice), ringSeconds(hz, cfg) * 1000 + 60);
+  voice.timer = setTimeout(() => freeVoice(voice), ringSeconds(hz, config) * 1000 + 60);
 }
 
 function freeVoice(voice: Voice): void {
@@ -217,49 +217,126 @@ function schedule(work: () => Promise<void>): void {
     .catch((err) => console.error("audio:", err));
 }
 
+/** A hand doesn't hit every string at the same force. */
+function velocity(config: PluckAudioConfig): number {
+  const spread = config.variation.velocitySpread;
+  return 1 + (Math.random() * 2 - 1) * spread;
+}
+
+/**
+ * Hand-shaped strum offset: the k-th hit lands `gap * sum(pattern[0..k-1])`
+ * after the base time, so the treble bursts out and a final wide gap blooms
+ * into the bass string; random jitter loosens it like a real hand.
+ */
+function strumOffset(hitIndex: number, gapSeconds: number, jitterSeconds: number, pattern: number[]): number {
+  let patternSum = 0;
+  for (let i = 0; i < hitIndex; i++) patternSum += pattern[i] ?? 1;
+  return gapSeconds * patternSum + (Math.random() * 2 - 1) * jitterSeconds;
+}
+
+/** Peak amplitude for one guitar string, scaled by role, bass boost and how
+ * many strings sound (`count/6` keeps chords from clipping). */
+function guitarPeak(params: {
+  config: PluckAudioConfig;
+  isRoot: boolean;
+  stringIndex: number;
+  soundingCount: number;
+  velocity: number;
+}): number {
+  const { config, isRoot, stringIndex, soundingCount, velocity } = params;
+  const roles = config.roles;
+  const velocityFactor = isRoot ? roles.rootVel : roles.colorVel;
+  const bassBoost = stringIndex === 0 ? config.balance.bassBoost : 1;
+  return (config.micro.peak * velocityFactor * bassBoost * (soundingCount / 6) ** 0.5 + 0.06) * velocity;
+}
+
+/** Peak amplitude for one piano key; the register-aware path accents the root
+ * and the bass, the plain path keeps single fretboard dots at their old level. */
+function keyPeak(params: {
+  config: PluckAudioConfig;
+  register: boolean;
+  isRoot: boolean;
+  keyIndex: number;
+  keyCount: number;
+  velocity: number;
+}): number {
+  const { config, register, isRoot, keyIndex, keyCount, velocity } = params;
+  const roles = config.roles;
+  if (register) {
+    const velocityFactor = isRoot ? roles.rootVel : roles.colorVel;
+    const bassBoost = keyIndex === 0 ? config.balance.bassBoost : 1;
+    return (config.micro.peak * velocityFactor * bassBoost * (keyCount / 10) ** 0.5 + 0.06) * velocity;
+  }
+  const firstKeyBoost = keyIndex === 0 ? 1.3 : 1;
+  return (config.micro.peak * firstKeyBoost * (keyCount / 6) ** 0.5 + 0.06) * 0.9;
+}
+
 /** Pluck every sounding string of a voicing (muted strings skipped). */
 export function playVoicing(frets: (number | null)[], tuning: number[]): void {
-  const strings = frets.map((f, s) => ({ fret: f, s })).filter((x) => x.fret !== null);
-  const cfg = DEFAULT_CONFIG;
+  const config = DEFAULT_CONFIG;
   schedule(async () => {
     await ensure();
-    const base = ctx!.currentTime + NOTE_START;
-    const gap = cfg.strum.guitarMs / 1000;
-    const jitter = cfg.strum.jitterMs / 1000;
-    const count = strings.length;
-    if (count === 0) return;
+    const baseTime = context!.currentTime + NOTE_START;
+    const gap = config.strum.guitarMs / 1000;
+    const jitter = config.strum.jitterMs / 1000;
+    const soundingStrings = frets
+      .map((fret, stringIndex) => ({ fret, stringIndex }))
+      .filter((entry): entry is { fret: number; stringIndex: number } => entry.fret !== null);
+    if (soundingStrings.length === 0) return;
     // The chord's root is its lowest sounding pitch class, so `roles` accent
     // the same voice every time the same chord is played (no wiring needed).
-    const rootPc = Math.min(...strings.map((x) => (tuning[x.s]! + x.fret!) % 12));
+    const rootPitchClass = Math.min(
+      ...soundingStrings.map((entry) => (tuning[entry.stringIndex] + entry.fret) % 12),
+    );
     // Downstroke: treble strings first, thick low string last, like a hand.
-    const ordered = [...strings].sort((a, b) => b.s - a.s);
-    for (let k = 0; k < ordered.length; k++) {
-      const { fret, s } = ordered[k]!;
-      const midi = tuning[s]! + fret!;
-      const pc = midi % 12;
-      const isRoot = pc === rootPc;
-      const v = cfg.voices[s] ?? cfg.voices[0]!;
-      const r = cfg.roles;
+    const ordered = [...soundingStrings].sort((a, b) => b.stringIndex - a.stringIndex);
+    const roles = config.roles;
+
+    for (let hitIndex = 0; hitIndex < ordered.length; hitIndex++) {
+      const { fret, stringIndex } = ordered[hitIndex];
+      const midi = tuning[stringIndex] + fret;
+      const pitchClass = midi % 12;
+      const isRoot = pitchClass === rootPitchClass;
+      const voice = config.voices[stringIndex] ?? config.voices[0];
       const role: "root" | "color" = isRoot ? "root" : "color";
-      // Hand-shaped spacing: burst out on treble, bloom into the bass.
-      let pat = 0;
-      for (let j = 0; j < k; j++) pat += cfg.strum.pattern[j] ?? 1;
-      const off = gap * pat + (Math.random() * 2 - 1) * jitter;
-      // A hand doesn't hit every string at the same force.
-      const vel = 1 + (Math.random() * 2 - 1) * cfg.variation.velocitySpread;
-      const peak =
-        (cfg.micro.peak * (isRoot ? r.rootVel : r.colorVel) * (s === 0 ? cfg.balance.bassBoost : 1) * (count / 6) ** 0.5 + 0.06) *
-        vel;
-      // Bass strings go left, treble right, so voices separate in the stereo field.
-      const pan = count > 1 ? ((s / (count - 1)) * 2 - 1) * cfg.panning.spread : 0;
+      const offset = strumOffset(hitIndex, gap, jitter, config.strum.pattern);
       // Systematic identity: the string's fixed character, accented by its role,
       // with only a thin random sliver left over for humanity.
-      const brightness = clamp01(v.brightness * (isRoot ? r.rootBright : r.colorBright) + (Math.random() * 2 - 1) * cfg.variation.brightnessSpread);
-      const damping = clamp01(v.damping * (isRoot ? r.rootDamp : r.colorDamp) + (Math.random() * 2 - 1) * cfg.variation.dampingSpread);
-      const sustain = clamp01(v.sustain + (isRoot ? r.rootSustainAdd : r.colorSustainAdd) + (Math.random() * 2 - 1) * cfg.variation.sustainSpread);
-      const pick = clamp01(v.pick * (isRoot ? r.rootPick : r.colorPick));
-      const scoop = v.scoopCents;
-      startVoice(midiToFreq(midi), base + Math.max(0, off), { scoopCents: scoop, peak, brightness, damping, decay: v.decay, sustain, pick, pickBright: v.pickBright, pickDecayMs: v.pickDecayMs, pan, role, attackMs: v.attackMs, pickPos: v.pickPos, eq: v.eq }, cfg);
+      const params: VoiceParams = {
+        scoopCents: voice.scoopCents,
+        peak: guitarPeak({
+          config,
+          isRoot,
+          stringIndex,
+          soundingCount: soundingStrings.length,
+          velocity: velocity(config),
+        }),
+        brightness: clamp01(
+          voice.brightness * (isRoot ? roles.rootBright : roles.colorBright) +
+          (Math.random() * 2 - 1) * config.variation.brightnessSpread,
+        ),
+        damping: clamp01(
+          voice.damping * (isRoot ? roles.rootDamp : roles.colorDamp) +
+          (Math.random() * 2 - 1) * config.variation.dampingSpread,
+        ),
+        sustain: clamp01(
+          voice.sustain + (isRoot ? roles.rootSustainAdd : roles.colorSustainAdd) +
+          (Math.random() * 2 - 1) * config.variation.sustainSpread,
+        ),
+        pick: clamp01(voice.pick * (isRoot ? roles.rootPick : roles.colorPick)),
+        // Bass strings go left, treble right, so voices separate in the stereo field.
+        pan: soundingStrings.length > 1
+          ? ((stringIndex / (soundingStrings.length - 1)) * 2 - 1) * config.panning.spread
+          : 0,
+        role,
+        attackMs: voice.attackMs,
+        decay: voice.decay,
+        pickBright: voice.pickBright,
+        pickDecayMs: voice.pickDecayMs,
+        pickPos: voice.pickPos,
+        eq: voice.eq,
+      };
+      startVoice(midiToFreq(midi), baseTime + Math.max(0, offset), params, config);
     }
   });
 }
@@ -271,34 +348,34 @@ export function playVoicing(frets: (number | null)[], tuning: number[]): void {
  */
 function registerParams(
   midi: number,
-  cfg: PluckAudioConfig,
+  config: PluckAudioConfig,
 ): Omit<VoiceParams, "peak" | "pan" | "role"> {
-  const { low, high } = cfg.piano;
-  const t = clamp01((midi - low.midi) / (high.midi - low.midi));
+  const { low, high } = config.piano;
+  const position = clamp01((midi - low.midi) / (high.midi - low.midi));
   // Interpolate each EQ knob where both endpoints define it; otherwise fall
   // back to the endpoint that has it.
-  const pick = (a: number | undefined, b: number | undefined): number | undefined => {
+  const interpolate = (a: number | undefined, b: number | undefined): number | undefined => {
     if (a === undefined && b === undefined) return undefined;
     if (a === undefined) return b;
     if (b === undefined) return a;
-    return lerp(a, b, t);
+    return lerp(a, b, position);
   };
-  const lowpassHz = pick(low.eq?.lowpassHz, high.eq?.lowpassHz);
-  const peakHz = pick(low.eq?.peakHz, high.eq?.peakHz);
+  const lowpassHz = interpolate(low.eq?.lowpassHz, high.eq?.lowpassHz);
+  const peakHz = interpolate(low.eq?.peakHz, high.eq?.peakHz);
   return {
-    scoopCents: lerp(low.scoopCents, high.scoopCents, t),
-    brightness: lerp(low.brightness, high.brightness, t),
-    damping: lerp(low.damping, high.damping, t),
-    sustain: lerp(low.sustain, high.sustain, t),
-    pick: lerp(low.pick, high.pick, t),
-    attackMs: lerp(low.attackMs, high.attackMs, t),
+    scoopCents: lerp(low.scoopCents, high.scoopCents, position),
+    brightness: lerp(low.brightness, high.brightness, position),
+    damping: lerp(low.damping, high.damping, position),
+    sustain: lerp(low.sustain, high.sustain, position),
+    pick: lerp(low.pick, high.pick, position),
+    attackMs: lerp(low.attackMs, high.attackMs, position),
     eq:
       lowpassHz !== undefined || peakHz !== undefined
         ? {
             lowpassHz,
             peakHz,
-            peakGainDb: pick(low.eq?.peakGainDb, high.eq?.peakGainDb),
-            peakQ: pick(low.eq?.peakQ, high.eq?.peakQ),
+            peakGainDb: interpolate(low.eq?.peakGainDb, high.eq?.peakGainDb),
+            peakQ: interpolate(low.eq?.peakQ, high.eq?.peakQ),
           }
         : undefined,
   };
@@ -314,46 +391,57 @@ function registerParams(
  */
 export function playNotes(midis: number[], register = false): void {
   if (midis.length === 0) return;
-  const cfg = DEFAULT_CONFIG;
+  const config = DEFAULT_CONFIG;
   schedule(async () => {
     await ensure();
-    const base = ctx!.currentTime + NOTE_START;
-    const roll = cfg.strum.pianoMs / 1000;
+    const base = context!.currentTime + NOTE_START;
+    const roll = config.strum.pianoMs / 1000;
     const count = midis.length;
-    const rootPc = count > 1 ? Math.min(...midis.map((m) => m % 12)) : -1;
-    const r = cfg.roles;
-    const spread = cfg.variation;
-    for (let i = 0; i < count; i++) {
-      const midi = midis[i]!;
-      const isRoot = count > 1 && midi % 12 === rootPc;
-      const peak = register
-        ? (cfg.micro.peak * (isRoot ? r.rootVel : r.colorVel) * (i === 0 ? cfg.balance.bassBoost : 1) * (count / 10) ** 0.5 + 0.06) *
-          (1 + (Math.random() * 2 - 1) * spread.velocitySpread)
-        : (cfg.micro.peak * (i === 0 ? 1.3 : 1) * (count / 6) ** 0.5 + 0.06) * 0.9;
-      const pan = register && count > 1 ? ((i / (count - 1)) * 2 - 1) * cfg.panning.spread : 0;
-      const p = register ? registerParams(midi, cfg) : null;
+    const rootPitchClass = count > 1 ? Math.min(...midis.map((midi) => midi % 12)) : -1;
+    const roles = config.roles;
+    for (let keyIndex = 0; keyIndex < count; keyIndex++) {
+      const midi = midis[keyIndex];
+      const isRoot = count > 1 && midi % 12 === rootPitchClass;
+      const profile = register ? registerParams(midi, config) : null;
       // Neutral multipliers when there's no breakdown to accent (single
       // guitar-fretboard dots keep their historical plain profile untouched).
-      const chroma = register
-        ? { b: isRoot ? r.rootBright : r.colorBright, d: isRoot ? r.rootDamp : r.colorDamp, s: isRoot ? r.rootSustainAdd : r.colorSustainAdd, pk: isRoot ? r.rootPick : r.colorPick }
-        : { b: 1, d: 1, s: 0, pk: 1 };
-      startVoice(
-        midiToFreq(midi),
-        base + i * roll,
-        {
-          scoopCents: p?.scoopCents ?? 0,
-          peak,
-          pan,
-          role: isRoot ? "root" : "color",
-          brightness: clamp01((p?.brightness ?? cfg.string.brightness) * chroma.b + (Math.random() * 2 - 1) * spread.brightnessSpread),
-          damping: clamp01((p?.damping ?? cfg.string.damping) * chroma.d + (Math.random() * 2 - 1) * spread.dampingSpread),
-          sustain: clamp01((p?.sustain ?? cfg.string.sustain) + chroma.s + (Math.random() * 2 - 1) * spread.sustainSpread),
-          pick: clamp01((p?.pick ?? cfg.attack.pickLevel) * chroma.pk),
-          attackMs: p?.attackMs ?? 3,
-          eq: p?.eq,
-        },
-        cfg,
-      );
+      const accent = register
+        ? {
+            brightness: isRoot ? roles.rootBright : roles.colorBright,
+            damping: isRoot ? roles.rootDamp : roles.colorDamp,
+            sustainAdd: isRoot ? roles.rootSustainAdd : roles.colorSustainAdd,
+            pick: isRoot ? roles.rootPick : roles.colorPick,
+          }
+        : { brightness: 1, damping: 1, sustainAdd: 0, pick: 1 };
+      const params: VoiceParams = {
+        scoopCents: profile?.scoopCents ?? 0,
+        peak: keyPeak({
+          config,
+          register,
+          isRoot,
+          keyIndex,
+          keyCount: count,
+          velocity: velocity(config),
+        }),
+        pan: register && count > 1 ? ((keyIndex / (count - 1)) * 2 - 1) * config.panning.spread : 0,
+        role: isRoot ? "root" : "color",
+        brightness: clamp01(
+          (profile?.brightness ?? config.string.brightness) * accent.brightness +
+          (Math.random() * 2 - 1) * config.variation.brightnessSpread,
+        ),
+        damping: clamp01(
+          (profile?.damping ?? config.string.damping) * accent.damping +
+          (Math.random() * 2 - 1) * config.variation.dampingSpread,
+        ),
+        sustain: clamp01(
+          (profile?.sustain ?? config.string.sustain) + accent.sustainAdd +
+          (Math.random() * 2 - 1) * config.variation.sustainSpread,
+        ),
+        pick: clamp01((profile?.pick ?? config.attack.pickLevel) * accent.pick),
+        attackMs: profile?.attackMs ?? 3,
+        eq: profile?.eq,
+      };
+      startVoice(midiToFreq(midi), base + keyIndex * roll, params, config);
     }
   });
 }
@@ -371,7 +459,7 @@ export function stopAudio(): void {
 export interface AudioDebugEvent {
   kind: "voice";
   /** Absolute schedule time on the AudioContext clock, seconds. */
-  t: number;
+  time: number;
   /** Scheduled frequency in Hz (after random detune). */
   freq: number;
   /** Per-string peak amplitude. */
@@ -411,8 +499,8 @@ export function getAudioDebugEvents(): AudioDebugEvent[] {
   return [...debugEvents];
 }
 
-function recordDebugEvent(ev: AudioDebugEvent): void {
-  debugEvents.push(ev);
+function recordDebugEvent(event: AudioDebugEvent): void {
+  debugEvents.push(event);
   if (debugEvents.length > DEBUG_EVENTS_CAP) debugEvents.shift();
 }
 
@@ -424,11 +512,11 @@ function recordDebugEvent(ev: AudioDebugEvent): void {
  */
 export function debugTap(): AnalyserNode | null {
   void ensure();
-  if (!ctx || !graph) return null;
-  const a = ctx.createAnalyser();
-  a.fftSize = 4096;
-  a.smoothingTimeConstant = 0;
-  a.connect(ctx.destination);
-  graph.master.connect(a);
-  return a;
+  if (!context || !graph) return null;
+  const analyser = context.createAnalyser();
+  analyser.fftSize = 4096;
+  analyser.smoothingTimeConstant = 0;
+  analyser.connect(context.destination);
+  graph.master.connect(analyser);
+  return analyser;
 }

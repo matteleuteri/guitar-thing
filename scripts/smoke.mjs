@@ -34,7 +34,7 @@ check(chordName([9, 0, 4, 7]).alternatives.includes("Am7"), "ACEG alt Am7");
 const pos = findPositions(ceg, STANDARD, 15);
 check(pos.length > 5, `found ${pos.length} C-E-G positions on 15 frets`);
 const allValid = pos.every((p) => {
-  const pc = (STANDARD[p.string] + p.fret) % 12;
+  const pc = (STANDARD[p.stringIndex] + p.fret) % 12;
   return ceg.includes(pc);
 });
 check(allValid, "all positions are target notes");
@@ -106,14 +106,14 @@ check(res6.fingerings.length > 0, "6-note set yields fingerings");
 check(ms6 < 10000, "perf under 10s");
 
 // ---- Song mode: chord parsing ----
-check(parseChord("C").pcs.join(",") === "0,4,7", `parseChord C -> [${parseChord("C").pcs}]`);
-check(parseChord("Am7").pcs.join(",") === "0,4,7,9", "parseChord Am7");
-check(parseChord("Bb7").pcs.join(",") === "2,5,8,10", "parseChord Bb7");
-check(parseChord("C6/9").pcs.join(",") === "0,2,4,7,9", "parseChord C6/9 (slash belongs to the suffix)");
-check(parseChord("F#m7b5").pcs.join(",") === "0,4,6,9", "parseChord F#m7b5");
-check(parseChord("Ddim7").pcs.join(",") === "2,5,8,11", "parseChord Ddim7");
-check(parseChord("C/G").pcs.join(",") === "0,4,7" && parseChord("C/G").bass === 7, "parseChord C/G bass kept");
-check(parseChord("Cmaj").pcs.join(",") === "0,4,7" && parseChord("CM").pcs.join(",") === "0,4,7", "maj/M spellings");
+check(parseChord("C").pitchClasses.join(",") === "0,4,7", `parseChord C -> [${parseChord("C").pitchClasses}]`);
+check(parseChord("Am7").pitchClasses.join(",") === "0,4,7,9", "parseChord Am7");
+check(parseChord("Bb7").pitchClasses.join(",") === "2,5,8,10", "parseChord Bb7");
+check(parseChord("C6/9").pitchClasses.join(",") === "0,2,4,7,9", "parseChord C6/9 (slash belongs to the suffix)");
+check(parseChord("F#m7b5").pitchClasses.join(",") === "0,4,6,9", "parseChord F#m7b5");
+check(parseChord("Ddim7").pitchClasses.join(",") === "2,5,8,11", "parseChord Ddim7");
+check(parseChord("C/G").pitchClasses.join(",") === "0,4,7" && parseChord("C/G").bass === 7, "parseChord C/G bass kept");
+check(parseChord("Cmaj").pitchClasses.join(",") === "0,4,7" && parseChord("CM").pitchClasses.join(",") === "0,4,7", "maj/M spellings");
 throws(() => parseChord("Z"), "unknown root rejects");
 throws(() => parseChord("Cweird"), "unknown suffix rejects");
 
@@ -122,9 +122,9 @@ const roundTrips = ["C", "G", "Am", "F", "Em7", "Dm7", "G7", "Cadd9", "Bb7", "F#
   "C7sus4", "Ddim7", "Csus2", "Eaug", "D6/9", "Cmaj7", "Gsus4", "B7", "Eb", "Am7/G", "C9"];
 let rtOk = true;
 for (const sym of roundTrips) {
-  const pcs = parseChord(sym).pcs;
+  const pcs = parseChord(sym).pitchClasses;
   const primary = chordName(pcs).primary;
-  const reparsed = parseChord(primary).pcs;
+  const reparsed = parseChord(primary).pitchClasses;
   if (pcs.join(",") !== reparsed.join(",")) { rtOk = false; console.error(`  round-trip ${sym}: ${pcs} vs ${reparsed}`); }
 }
 check(rtOk, "parseChord <-> chordName round-trip (set equality)");
@@ -181,7 +181,7 @@ if (planG) {
       sounding.push((STANDARD[s] + fr) % 12);
       lo = Math.min(lo, fr); hi = Math.max(hi, fr);
     }
-    if (sounding.length < 2 || !c.chord.pcs.every((p) => sounding.includes(p))) gShapeOk = false;
+    if (sounding.length < 2 || !c.chord.pitchClasses.every((p) => sounding.includes(p))) gShapeOk = false;
     if (lo !== Infinity && hi - lo > 5) gShapeOk = false;
   }
   // a real greedy walk must never beat the DP's total
@@ -190,7 +190,7 @@ if (planG) {
   for (let i = 1; i < planG.chords.length; i++) {
     let best = Infinity;
     let bestCand = null;
-    for (const cand of findFingerings(progA[i].pcs, STANDARD, 15, 5, 300).fingerings) {
+    for (const cand of findFingerings(progA[i].pitchClasses, STANDARD, 15, 5, 300).fingerings) {
       const c = refGuitar(prev, cand);
       if (c < best) { best = c; bestCand = cand; }
     }
@@ -236,14 +236,14 @@ if (planP) {
     if (ks.length !== new Set(ks).size) pShapeOk = false;
     if (Math.max(...ks) - Math.min(...ks) > 12) pShapeOk = false;
     const pcs = ks.map((k) => k % 12);
-    if (!c.chord.pcs.every((p) => pcs.includes(p))) pShapeOk = false;
+    if (!c.chord.pitchClasses.every((p) => pcs.includes(p))) pShapeOk = false;
   }
   let prev = planP.chords[0].voicing.keys;
   let greedy = 0;
   for (let i = 1; i < planP.chords.length; i++) {
     let best = Infinity;
     let bestCand = null;
-    for (const cand of findPianoVoicings(progA[i].pcs, 48, 84, 12, 300).voicings) {
+    for (const cand of findPianoVoicings(progA[i].pitchClasses, 48, 84, 12, 300).voicings) {
       const c = refPiano(prev, cand.keys);
       if (c < best) { best = c; bestCand = cand; }
     }

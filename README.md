@@ -10,7 +10,8 @@ npm install
 npm start        # builds + serves on http://localhost:5173
 ```
 
-`npm test` builds and runs a Node smoke test of the theory/fingering logic.
+`npm test` builds and runs a Node smoke suite: it asserts the theory/fingering/voicing
+invariants and perf, plus stubs Web Audio to check the scheduling/strum graph.
 
 > The app must be served over HTTP (`file://` blocks ES modules), so use the included
 > `server.mjs` rather than opening `index.html` directly.
@@ -106,7 +107,7 @@ decay loop, a shared body EQ and a small room tail. Each guitar string has a fix
 character (pickup-style EQ, attack, scrape brightness/length); the chord's root and
 color tones are accented systematically, with only a thin random humanizing sliver
 (detune, jitter) left over. Guitar chords strum treble → bass one string at a time
-(scrollable via the "Strum speed (ms)" field) and piano voicings roll ~8 ms so
+(adjustable via the "Strum speed (ms)" field) and piano voicings roll ~8 ms so
 voices don't fuse. All of it is tunable from one config constant: `DEFAULT_CONFIG`
 in `src/synth/config.ts`.
 
@@ -114,8 +115,10 @@ in `src/synth/config.ts`.
 dark/felted/long bass profile to a bright/snappy/short treble profile (`cfg.piano`).
 Solo fretboard dots keep a plain profile.
 
-> Audio work in progress lives on the `dev-audio` branch; the live site's `main`
-> is deliberately frozen. See `AGENTS.md` for the current approved sound.
+> The current sound is the one the user approved (physical string core +
+> per-string scrape). Audio experiments are tuned live via `DEFAULT_CONFIG` and
+> verified with the `/debug/audio-debug.html` harness; see `AGENTS.md` for the
+> approved sound and the parked/backlog leads.
 
 **Debugging the sound.** `npm run debug` then open
 `/debug/audio-debug.html`: it auto-strums a few chords and shows the RMS
