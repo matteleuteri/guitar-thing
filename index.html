@@ -9,19 +9,40 @@
 <body>
   <header>
     <h1>Note/Chord Finder</h1>
-    <p>
+    <p id="desc-chord">
       Give it a set of notes: it highlights every spot on the fretboard where those notes live,
       then finds chord fingerings (muted strings allowed) where every chord note is played and
       all fretted positions lie within a small fret span.
     </p>
+    <p id="desc-song" hidden>
+      Give it a chord progression: it picks one voicing per chord and chains them so the whole
+      song shifts as little as possible, highlighting the notes you can keep held as it changes.
+    </p>
   </header>
 
   <section id="controls">
-    <div class="note-picker">
+    <div class="note-picker" id="note-picker">
       <span class="note-picker-label">Notes</span>
       <div id="note-grid" class="note-grid"></div>
     </div>
     <form id="form" autocomplete="off">
+      <div class="field">
+        <label for="mode">Mode</label>
+        <select id="mode">
+          <option value="chord">Chord</option>
+          <option value="song">Song</option>
+        </select>
+      </div>
+      <div id="song-only" hidden>
+        <div class="field">
+          <label for="progression">Progression (chord names, e.g. C G Am F)</label>
+          <input id="progression" type="text" value="C G Am F" />
+        </div>
+        <div class="field">
+          <label for="gap">Chord gap (ms)</label>
+          <input id="gap" type="number" min="200" max="10000" step="100" value="1500" title="Pause between chords when playing the whole arrangement" />
+        </div>
+      </div>
       <div class="field">
         <label for="instrument">Instrument</label>
         <select id="instrument">
@@ -62,7 +83,7 @@
         <input id="span" type="number" min="1" max="24" value="5" />
       </div>
       <div class="field">
-        <label for="cap">Max results / chord</label>
+        <label for="cap" id="cap-label">Max results / chord</label>
         <input id="cap" type="number" min="1" max="10000" value="500" />
       </div>
       <div class="field">
@@ -87,7 +108,7 @@
   </section>
 
   <section id="chords">
-    <h2><span id="chords-title">Chord fingerings</span> <span id="chord-summary" class="muted"></span></h2>
+    <h2><span id="chords-title">Chord fingerings</span> <span id="chord-summary" class="muted"></span><span id="song-actions"></span></h2>
     <div id="chord-list"></div>
   </section>
 

@@ -58,6 +58,17 @@ releases new code.
 3. Adjust **Max span (frets)** / **Max reach (semitones)** to loosen or tighten the
    chord window.
 
+### Song / progression mode
+
+Switch **Mode** from *Chord* to *Song* and type a progression (chord names separated
+by spaces/commas/bars, e.g. `C G Am F` or `C | G/B | Am | F`). The app picks **one**
+voicing per chord so the whole arrangement shifts as little as possible: notes that
+stay on the same fret/key across a change are highlighted as *held*, each card shows
+the movement cost to the previous chord, and **Play arrangement ▶** strums every
+chord in sequence (one per **Chord gap (ms)**). A written bass (`C/G`) is a soft
+preference for the lowest sounding note. Slash chords like `C6/9` (a *6/9* chord)
+and accidental spellings (`Bb7`, `F#m7b5`, `CM7`/`Cmaj7`) are understood.
+
 Each card shows the chord name (with "also …" aliases for ambiguous spellings like
 `ACEG` = `C6` / `Am7`). Guitar diagrams show open/mute markers, dots with note letters,
 suggested finger numbers, barre notes, and the sounding notes. Piano voicings render as

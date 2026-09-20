@@ -129,6 +129,7 @@ function keyboardEl(
   nameOf: (pc: number) => string,
   baseClass: string,
   extraClass = "",
+  held?: Set<number>,
 ): HTMLElement {
   const { whites, blacks } = keyView(low, high);
   const wc = Math.max(1, whites.length);
@@ -143,6 +144,7 @@ function keyboardEl(
       wkey.style.background = colorFor(pc);
       wkey.classList.add("kb-hit");
     }
+    if (held?.has(m)) wkey.classList.add("kb-held");
     wkey.appendChild(el("span", `${baseClass}-mark`, nameOf(pc)));
     wkey.title = midiName(m);
     wkey.addEventListener("click", () => playNotes([m], true));
@@ -159,6 +161,7 @@ function keyboardEl(
       bkey.style.background = colorFor(pc);
       bkey.classList.add("kb-hit");
     }
+    if (held?.has(m)) bkey.classList.add("kb-held");
     bkey.style.left = `${(leftCount / wc) * 100}%`;
     bkey.style.width = `${(0.62 / wc) * 100}%`;
     bkey.title = midiName(m);
@@ -185,13 +188,15 @@ export function renderPiano(
   return keyboardEl(low, high, marked, nameOf, "kb");
 }
 
-/** Mini keyboard showing one piano voicing; ▶ plays the pressed keys. */
+/** Mini keyboard showing one piano voicing; ▶ plays the pressed keys. Held keys get `.kb-held`. */
 export function renderPianoVoicing(
   keys: number[],
   nameOf: (pc: number) => string,
   id: number,
+  opts?: { held?: number[] },
 ): HTMLElement {
-  const box = keyboardEl(Math.min(...keys), Math.max(...keys), new Set(keys), nameOf, "kb", "pp");
+  const box = keyboardEl(Math.min(...keys), Math.max(...keys), new Set(keys), nameOf, "kb", "pp",
+    new Set(opts?.held ?? []));
   box.appendChild(el("span", "cd-id", String(id)));
   box.title = `Voicing ID ${id}`;
 
@@ -205,13 +210,20 @@ export function renderPianoVoicing(
   return box;
 }
 
+/**
+ * Chord skeleton: head mute/open markers, fretted rows, barres, finger numbers,
+ * sounding notes. Held strings (unchanged from the previous song chord) get
+ * `.cd-held` on their dot and head marker.
+ */
 export function renderChordDiagram(
   fingering: Fingering,
   tuning: number[],
   nameOf: (pc: number) => string,
   id: number,
+  opts?: { held?: boolean[] },
 ): HTMLElement {
   const { frets } = fingering;
+  const held = opts?.held ?? [];
   const box = el("div", "chord-diagram");
   box.appendChild(el("span", "cd-id", String(id)));
   box.title = `Voicing ID ${id}`;
@@ -226,32 +238,38 @@ export function renderChordDiagram(
 
   // Head row: mute / open markers per string.
   const head = el("div", "cd-head");
-  for (const f of frets) head.appendChild(el("span", "", f === null ? "×" : f === 0 ? "○" : ""));
+  for (let s = 0; s < frets.length; s++) {
+    const f = frets[s]!;
+    const marker = el("span", held[s] ? "cd-held" : "", f === null ? "×" : f === 0 ? "○" : "");
+    if (f === null || f === 0) marker.title = held[s] ? "held open string" : "";
+    head.appendChild(marker);
+  }
   box.appendChild(head);
 
-  // Body rows: fretted positions only.
+  // Body rows: fretted positions. Every diagram gets at least three frets so a
+  // simple (or all-open) chord still reads as a grid beside fuller ones.
   const positives = frets.filter((f): f is number => f !== null && f > 0);
   const body = el("div", "cd-body");
-  if (positives.length > 0) {
-    const lo = Math.min(...positives);
-    const hi = Math.max(...positives);
-    for (let f = lo; f <= hi; f++) {
-      const row = el("div", "cd-row");
-      row.appendChild(el("span", "cd-fretnum", f));
-      for (let s = 0; s < tuning.length; s++) {
-        const cell = el("div", "cd-cell");
-        cell.appendChild(el("span", "cd-string"));
-        if (frets[s] === f) {
-          const pc = pcAt(tuning, s, f);
-          const dot = el("span", "cd-dot", nameOf(pc));
-          dot.style.setProperty("--c", colorFor(pc));
-          dot.title = `${nameOf(pc)} · ${midiName(tuning[s]! + f)} · string ${s + 1} fret ${f}`;
-          cell.appendChild(dot);
-        }
-        row.appendChild(cell);
+  const lo = positives.length > 0 ? Math.min(...positives) : 1;
+  const hi = Math.max(positives.length > 0 ? Math.max(...positives) : lo, lo + 2);
+  for (let f = lo; f <= hi; f++) {
+    const row = el("div", "cd-row");
+    row.appendChild(el("span", "cd-fretnum", f));
+    for (let s = 0; s < tuning.length; s++) {
+      const cell = el("div", "cd-cell");
+      cell.appendChild(el("span", "cd-string"));
+      if (frets[s] === f) {
+        const pc = pcAt(tuning, s, f);
+        const dot = el("span", held[s] ? "cd-dot cd-held" : "cd-dot", nameOf(pc));
+        dot.style.setProperty("--c", colorFor(pc));
+        dot.title = held[s]
+          ? `${nameOf(pc)} · ${midiName(tuning[s]! + f)} · string ${s + 1} fret ${f} · held`
+          : `${nameOf(pc)} · ${midiName(tuning[s]! + f)} · string ${s + 1} fret ${f}`;
+        cell.appendChild(dot);
       }
-      body.appendChild(row);
+      row.appendChild(cell);
     }
+    body.appendChild(row);
   }
   box.appendChild(body);
 

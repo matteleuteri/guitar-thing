@@ -71,6 +71,18 @@ from the local `dist/` (that folder is gitignored). CI owns it:
 - `src/theory.ts` — pitch classes, parsing, tunings, chord-name identification.
 - `src/fretboard.ts` — `findPositions` + `findFingerings` (guitar core algorithm).
 - `src/piano.ts` — `findPianoKeys` + `findPianoVoicings` (piano core algorithm).
+- `src/song.ts` — `parseProgression` + `planGuitarSong`/`planPianoSong`: song/progression
+  mode. Parses a chord-sheet line, then picks ONE voicing per chord (from the existing
+  engines) so the whole arrangement moves as little as possible — a Viterbi/DP
+  shortest path over per-chord candidates. `parseChord` lives in `theory.ts` (inverts
+  `CHORD_PATTERNS`: root + `#`/`b`, quality suffix incl. `M`/`Maj` aliases, optional
+  `/bass` → `ParsedChord{name, root, bass, pcs}`). Per-chord costs: guitar = per-string
+  `|Δfret|` + mute-change penalty + small hand-position jump, piano = sorted-key
+  `Σ|ΔMIDI|` + extra-key penalty; slash-chord bass is a soft preference (lowest note
+  should match). Chords whose frets/keys are identical to the previous chord are
+  reported as "held" and highlighted (`.cd-held`/`.kb-held`). Candidate budget is
+  capped (`SONG_CAP` 400, `cap` min applies) which may make the DP myopic past the
+  low-fret window — note this before "global" claims.
 - `src/render.ts` — DOM builders: `el()`, `colorFor()`, `renderPositions()`,
   `renderChordDiagram()`, `renderPiano()`/`renderPianoVoicing()`, finger/barre helpers.
 - `src/audio.ts` — public sound API (`playVoicing`, `playNotes`, `stopAudio`);

@@ -151,3 +151,88 @@ export function chordName(pcs: number[]): ChordName {
   ).slice(0, 3);
   return { primary: chosen.name, alternatives: altList };
 }
+
+export interface ParsedChord {
+  /** The raw token as typed, e.g. "C/G" or "Bb7". */
+  name: string;
+  /** Root pitch class 0..11. */
+  root: number;
+  /** Bass pitch class from a slash chord ("C/G" -> G), or null. */
+  bass: number | null;
+  /** Full pitch-class set, sorted ascending. */
+  pcs: number[];
+}
+
+const SUFFIX_INTERVALS = new Map<string, number[]>(
+  CHORD_PATTERNS.map((p) => [p.name, p.intervals]),
+);
+
+/** Normalize chord-symbol spellings ("M7"/"Maj7" -> "maj7", "Cmaj" -> major). */
+function canonicalSuffix(raw: string): string {
+  if (raw === "M" || raw === "Maj" || raw === "MAJ" || raw === "maj") return "";
+  if (raw.charAt(0) === "M") {
+    let rest = raw.slice(1).toLowerCase();
+    if (rest.startsWith("aj")) rest = rest.slice(2);
+    return rest === "" ? "" : `maj${rest}`;
+  }
+  return raw.toLowerCase();
+}
+
+const ROOT_ALIASES = new Map<string, number>();
+SHARP_NAMES.forEach((n, i) => ROOT_ALIASES.set(n.toLowerCase(), i));
+for (const [alias, pc] of [
+  ["ab", 8], ["bb", 10], ["db", 1], ["eb", 3], ["gb", 6],
+] as [string, number][]) {
+  ROOT_ALIASES.set(alias, pc);
+}
+
+function parseRootSuffix(main: string): { root: number; suffix: string } | null {
+  const letter = main.charAt(0).toLowerCase();
+  let root = ROOT_ALIASES.get(letter);
+  if (root === undefined) return null;
+  const acc = main.charAt(1);
+  if (acc === "#") { root = (root + 1) % SEMITONES; return { root, suffix: main.slice(2) }; }
+  if (acc === "b") { root = (root - 1 + SEMITONES) % SEMITONES; return { root, suffix: main.slice(2) }; }
+  return { root, suffix: main.slice(1) };
+}
+
+function parseBassPc(token: string): number | null {
+  const m = /^([A-Ga-g])([#b]?)$/.exec(token.trim());
+  if (!m) return null;
+  let pc = ROOT_ALIASES.get(m[1].toLowerCase())!;
+  if (m[2] === "#") pc = (pc + 1) % SEMITONES;
+  else if (m[2] === "b") pc = (pc - 1 + SEMITONES) % SEMITONES;
+  return pc;
+}
+
+/**
+ * Parse a chord symbol into pitch classes: optional root with #/b, then a
+ * quality suffix from `CHORD_PATTERNS` (bare root = major; "M"/"Maj" also
+ * major), optionally followed by "/bass" for slash/inversion chords.
+ */
+export function parseChord(input: string): ParsedChord {
+  const token = input.trim();
+  if (!token) throw new Error("Empty chord name.");
+  let main = token;
+  let bass: number | null = null;
+
+  const parts = token.split("/");
+  if (parts.length > 1) {
+    for (let k = parts.length - 1; k >= 1; k--) {
+      const candMain = parts.slice(0, k).join("/");
+      const candBass = parseBassPc(parts.slice(k).join("/"));
+      if (parseRootSuffix(candMain) && candBass !== null) {
+        main = candMain;
+        bass = candBass;
+        break;
+      }
+    }
+  }
+
+  const parsed = parseRootSuffix(main);
+  if (!parsed) throw new Error(`Unknown chord "${token}".`);
+  const intervals = SUFFIX_INTERVALS.get(canonicalSuffix(parsed.suffix));
+  if (intervals === undefined) throw new Error(`Unknown chord "${token}".`);
+  const pcs = [...new Set(intervals.map((i) => (parsed.root + i) % SEMITONES))].sort((a, b) => a - b);
+  return { name: token, root: parsed.root, bass, pcs };
+}
