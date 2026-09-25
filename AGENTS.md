@@ -45,22 +45,30 @@ vendored smplr build (`assets/smplr.mjs`, `/dist/index.mjs` copied as-is and
 imported **module-relative** — the app ships unbundled ESM, so a bare `"smplr"`
 specifier would 404 and `node_modules/` isn't deployed; the relative import
 works from the root app, the `/debug` harness and the `/guitar-thing/` Pages
-subdir). Design: the kit text is fetched **once** (a once-caching wrapper around
-smplr's storage — Soundfont would otherwise fetch it once per instance), and
-**six `Soundfont` instances, one per string**, sharing a `SampleLoader`, each
-writing into its own `[gate → StereoPanner]` chain onto `graph.master`
-(bypassing body EQ/IR/room like the samples, since a real guitar already
-carries body and room). DecodeAudioData still runs per instance on first load
-(smplr decodes before reaching the shared loader; ready only gates routing once
-every decode completed, and a failed decode — e.g. Safari lacks ogg/vorbis —
-reverts the engine to samples/synth). The music is unchanged: root/color
-`roles` reach the sampler as **velocity**, gates hold silent from t=0 (the
-one‑sound guard still ours), the treble-first strum spreads, and each string
-sits a fixed stereo seat (low E left → high E right). Engine select
-`config.engine.mode` (`"smplr" | "samples" | "synth"`, default `"smplr"`) plus
-`setEngineMode()` (exported; the harness radio uses it); the K–S synth and the
-recorded-string bank remain selectable for A/B and double as fallbacks while
-the kit loads or for notes no sample covers. The kit is **pre-loaded on page
+subdir). Design: the kit is fetched **once** and **decoded a SINGLE time** —
+    all 88 notes go through `decodeAudioData` once (smplr's own `Soundfont`
+    would fetch+decode the kit once PER INSTANCE, i.e. 528 decodes — the
+    redundancy that made a fresh page's first play land on the synth fallback
+    on slower devices) — then **six per-string `Instrument` instances share the
+    decoded `Map<noteName, AudioBuffer>`**, each writing into its own
+    `[gate → StereoPanner]` chain onto `graph.master`
+    (bypassing body EQ/IR/room like the samples, since a real guitar already
+    carries body and room). The kit text is parsed in a tiny `parseSoundfontJs`
+    (slice between the literal's first `{` and final `}`, strip each value's
+    `data:...base64,` prefix, `atob`) and decoded with live progress ticks
+    (smplr's progress only reports AFTER decode). A failed decode — e.g. Safari
+    lacks ogg/vorbis — skips that note; ready only gates routing once every
+    string's instrument is loaded, and a failure reverts the engine to
+    samples/synth. Decoded buffers are cached per-context (`decodeCache`
+    WeakMap), so a mode-toggle engine rebuild on the same context doesn't
+    re-decode. The music is unchanged: root/color
+    `roles` reach the sampler as **velocity**, gates hold silent from t=0 (the
+    one‑sound guard still ours), the treble-first strum spreads, and each string
+    sits a fixed stereo seat (low E left → high E right). Engine select
+    `config.engine.mode` (`"smplr" | "samples" | "synth"`, default `"smplr"`) plus
+    `setEngineMode()` (exported; the harness radio uses it); the K–S synth and the
+    recorded-string bank remain selectable for A/B and double as fallbacks while
+    the kit loads or for notes no sample covers. The kit is **pre-loaded on page
 load** (`preloadGuitarEngine()` — builds the graph + starts the 2.6 MB
 fetch/decode on `DOMContentLoaded`, no gesture needed; the context is simply
 created suspended), and a play that lands mid-decode **waits for it, bounded**
@@ -322,14 +330,15 @@ TypeScript is the only devDependency. No frameworks.
   t=0, ramp at the strum slot), per-string fixed pans (low E left → high E
   right), and root/color `roles` mapped to sampler velocities. The kit is
   self-hosted (`assets/guitar-steel-ogg.js`, MusyngKite `acoustic_guitar_steel`,
-  ~2.6 MB, `MIDI.Soundfont` format), fetched ONCE via a once-caching storage
-  wrapper, and decoded per instance into a shared `SampleLoader`; the first
-  play after picking smplr primes the engine (that play falls back to
-  samples/synth). `setEngineMode()` switches live; the harness radio drives it
+  ~2.6 MB, `MIDI.Soundfont` format), fetched + decoded ONCE into a shared
+  `Map<noteName, AudioBuffer>`; six per-string `Instrument` instances replay
+  those buffers through smplr's own preset/velocity machinery — no per-instance
+  decode, so a fresh page's kit is ready 6× faster than a Soundfont-per-string
+  setup would be. `setEngineMode()` switches live; the harness radio drives it
   and `getSmplrStatus()` shows load progress. Debug events carry
   `kind: "kit"` + `midi`/`velocity`. `scripts/audio-sched.mjs` exercises the
-  whole graph against a stub (`globalThis.__SMPLR_FAKE__`) that records
-  `start()` calls.
+  whole graph against a stub (`globalThis.__SMPLR_FAKE__`, incl. a stub
+  `decodeKit`) that records `start()` calls.
 - Voice separation is deliberate and **systematic**, not random. Each guitar
   string has a fixed identity in `voices[]` (index 0 = lowest/thickest) — not
   just brightness, but a full per-string profile: a commuted-pluck `pickPos`
@@ -756,13 +765,18 @@ register work is parked; guitar realism is the active thread. Candidate leads:
     runtime dependency): a purpose-built Web Audio sampler playing a real,
     consistent GM steel-guitar kit (MusyngKite `acoustic_guitar_steel`,
     self-hosted as `assets/guitar-steel-ogg.js`, ~2.6 MB, `MIDI.Soundfont` JS
-    data format that smplr's Soundfont parses natively). Design: the kit text
-    is fetched ONCE (a once-caching wrapper around smplr's `storage` — its
-    Soundfont would otherwise re-fetch it for every instance; decode still
-    runs per instance and `ready` only gates routing once every one has),
-    then **six `Soundfont` instances, one per string**, each with
-    `instrumentUrl` + the shared `loader` and a `destination` that is our own
-    persistent per-string `[gate → StereoPanner]` chain onto `graph.master`.
+    data format). Design: the kit text is parsed in a tiny `parseSoundfontJs`
+    (slice between the literal's first `{` and final `}` — JSON.parse of the
+    rest — then strip each value's `data:...base64,` prefix and `atob` it),
+    and decoded into a shared `Map<noteName, AudioBuffer>` with a SINGLE
+    `decodeAudioData` pass per note, per context (cached in a `decodeCache`
+    WeakMap so an engine rebuild on the same context doesn't re-decode). The
+    original per-Soundfont approach decoded the kit SIX times (528 OGG frames
+    → a slow first load and a mid-decode first play that fell back to the
+    synth); six per-string `Instrument` instances now share the one buffer
+    map via `loadInstrument(soundfontToPreset(noteNames), buffers)`, and
+    `ready` only gates routing once every string's instrument is loaded — a
+    failed decode (Safari lacks ogg/vorbis) just skips that note.
     The music survives engine swap untouched: `scheduleKitVoice` (audio.ts)
     hands the sampler `{note: fretted midi, velocity: roles-mapped}` at the
     same strum slot, the gate holds the one-sound guard (silent from t=0,

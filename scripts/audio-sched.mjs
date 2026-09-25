@@ -295,28 +295,34 @@ check(sevs.some((e) => e.role === "root") && sevs.some((e) => e.role === "color"
 
 // ---------------------------------------------------------------------------
 // smplr kit (progress 21): the sampled-guitar engine drives guitar voicings
-// from a real GM kit through SIX per-string Soundfont instances, each with its
-// own [gate → pan] seat. The music is the same as the other paths — root/color
-// roles reach the sampler as velocity, gates hold silent from t=0, the strum
-// spreads AND each string keeps a fixed stereo seat (physical lows always
-// left, highs always right).
+// from a real GM kit decoded ONCE into a shared buffer map, replayed through
+// SIX per-string Instrument instances, each with its own [gate → pan] seat.
+// The music is the same as the other paths — root/color roles reach the
+// sampler as velocity, gates hold silent from t=0, the strum spreads AND each
+// string keeps a fixed stereo seat (physical lows always left, highs always
+// right).
 // ---------------------------------------------------------------------------
 // Fake smplr: the real package would fetch + decode a 2.6 MB kit, so the
 // scheduling graph is exercised against a recording stub instead. Our engine
 // reads smplr through `globalThis.__SMPLR_FAKE__`, so both the real and the
-// fake take the exact same code path.
+// fake take the exact same code path. The engine now decodes the kit ONCE
+// (88 notes, not 88×6) and hands the buffer map to six `Instrument` factories,
+// so the fake must cover `decodeKit` + `Instrument` + `soundfontToPreset`.
 const kitStarts = [];
 globalThis.__SMPLR_FAKE__ = {
   SampleLoader: () => ({}),
-  Soundfont: (_ctx, opts) => {
+  decodeKit: () => Promise.resolve({ buffers: new Map(), noteNames: [] }),
+  soundfontToPreset: () => ({}),
+  Instrument: (plugin) => (ctx, opts) => {
     const inst = {
-      ready: Promise.resolve(),
-      load: Promise.resolve(),
+      ready: null,
+      load: null,
       start({ note, velocity, time, stopId }) {
         kitStarts.push({ note, velocity, time, stopId, dest: opts.destination });
       },
       stop() {},
     };
+    inst.ready = Promise.resolve(plugin(ctx, opts, { loadInstrument: async () => undefined }));
     if (opts && opts.onLoadProgress) opts.onLoadProgress({ loaded: 1, total: 1 });
     return inst;
   },

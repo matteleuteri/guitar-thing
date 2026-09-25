@@ -1,19 +1,25 @@
 /**
  * smplr guitar engine (progress 21) — the sampled-guitar front door. One GM
  * steel-guitar kit (self-hosted `assets/guitar-steel-ogg.js`, the MusyngKite
- * `acoustic_guitar_steel`) is fetched ONCE (a once-caching wrapper around
- * smplr's storage) and then SIX Soundfont instances — one per string — each
- * decode it into a shared `SampleLoader` and write into their own
- * `[gate → stereo panner]` chain onto the app's master bus. The gate is ours
- * (holds silence from t=0, ramps at the note's strum slot), so the "one
- * sound" guard that protects the K–S and sample paths holds here too, and the
- * per-string instances give each string a fixed stereo seat (bass left →
- * treble right) the same way the synthesized voices do.
+ * `acoustic_guitar_steel`) is fetched + decoded ONCE — all 88 notes pass
+ * through `decodeAudioData` a single time — and then six per-string
+ * `Instrument` instances share the resulting buffer map, each writing into its
+ * own `[gate → stereo panner]` chain onto the app's master bus. (smplr's own
+ * `Soundfont` would fetch+decode the kit PER INSTANCE, i.e. six times — the
+ * redundant 528 decodes are what made a fresh page's first play land in the
+ * fallback on slower devices; the kit's ~2.6 MB text is also downloaded once,
+ * through the once-caching storage wrapper.) The gate is ours (holds silence
+ * from t=0, ramps at the note's strum slot), so the "one sound" guard that
+ * protects the K–S and sample paths holds here too, and the per-string
+ * instances give each string a fixed stereo seat (bass left → treble right)
+ * the same way the synthesized voices do.
  *
  * Testability: `scripts/audio-sched.mjs` stubs Web Audio but not smplr, so the
  * audio graph assertions are run against OUR gate/panner nodes while a fake
  * smplr (via `globalThis.__SMPLR_FAKE__`) records the `start()` calls — notes,
- * per-string order, roles and times — as the ground truth.
+ * per-string order, roles and times — as the ground truth. The fake also
+ * supplies a stub `decodeKit`, so the Node test never fetches or decodes the
+ * real 2.6 MB kit.
  */
 
 import type { PluckAudioConfig } from "./config.js";
@@ -55,9 +61,8 @@ interface KitStorageFetch {
  * smplr's Soundfont fetches the kit text per instance, so six per-string
  * instances would download ~2.6 MB six times. Wrapping the default storage to
  * fetch each URL once (caching the PROMISE, so parallel instances share one
- * request) keeps the kit to a single download. Buffer DECODE still happens per
- * instance (smplr decodes before it reaches the shared loader) — revisit with
- * a preset-first loader if the first-load cost ever shows.
+ * request) keeps the kit to a single download — belt and braces, since the
+ * decode path below fetches once for everyone anyway.
  */
 function onceFetchStore(inner: KitStorageFetch): KitStorageFetch {
   const cache = new Map<string, ReturnType<KitStorageFetch["fetch"]>>();
@@ -71,6 +76,80 @@ function onceFetchStore(inner: KitStorageFetch): KitStorageFetch {
       return p;
     },
   };
+}
+
+/**
+ * The kit file is a plain `MIDI.Soundfont.<name> = { "<note>": "data:audio/...
+ * ;base64,<data>", ... };` literal. Everything between the first `{` and the
+ * final `}` is JSON; each value's `data:...base64,` mime prefix is stripped
+ * before `atob`.
+ */
+function parseSoundfontJs(text: string): Record<string, string> {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end <= start) {
+    throw new Error("soundfont: could not find the kit's note table");
+  }
+  const data = JSON.parse(text.slice(start, end + 1)) as Record<string, string>;
+  const out: Record<string, string> = {};
+  for (const noteName of Object.keys(data)) {
+    const value = data[noteName];
+    const comma = value.indexOf(",");
+    out[noteName] = comma >= 0 ? value.slice(comma + 1) : value;
+  }
+  return out;
+}
+
+function base64ToArrayBuffer(base64: string): ArrayBuffer {
+  const bin = atob(base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes.buffer;
+}
+
+/** Pre-decoded kit: every note name → its AudioBuffer (all on one context). */
+export interface KitDecode {
+  buffers: Map<string, AudioBuffer>;
+  noteNames: string[];
+}
+
+/** Decoding is context-bound (an AudioBuffer belongs to its AudioContext), so
+ *  cache the completed decode per context — a mode toggle rebuilds the engine
+ *  on the same context without re-decoding the kit. */
+const decodeCache = new WeakMap<BaseAudioContext, Promise<KitDecode>>();
+
+/**
+ * Fetch + decode the whole kit ONCE for a context. `onProgress` ticks per note
+ * so the harness can show a live count while the 88 OGG frames come in.
+ */
+function decodeKitOnce(
+  context: BaseAudioContext,
+  url: string,
+  onProgress?: (loaded: number, total: number) => void,
+): Promise<KitDecode> {
+  const cached = decodeCache.get(context);
+  if (cached) return cached;
+  const decoding = (async (): Promise<KitDecode> => {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`soundfont: kit fetch failed (${res.status})`);
+    const data = parseSoundfontJs(await res.text());
+    const noteNames = Object.keys(data);
+    const buffers = new Map<string, AudioBuffer>();
+    await Promise.all(
+      noteNames.map(async (noteName) => {
+        try {
+          const buffer = await context.decodeAudioData(base64ToArrayBuffer(data[noteName]));
+          buffers.set(noteName, buffer);
+        } catch (error) {
+          console.warn(`soundfont: failed to decode ${noteName}`, error);
+        }
+        onProgress?.(buffers.size, noteNames.length);
+      }),
+    );
+    return { buffers, noteNames: [...buffers.keys()] };
+  })();
+  decodeCache.set(context, decoding);
+  return decoding;
 }
 
 /** The parts of a smplr instrument our engine touches (matches the real and
@@ -118,20 +197,37 @@ export class SmplrGuitarEngine {
     master: AudioNode,
     private readonly config: PluckAudioConfig,
   ) {
-    const { Soundfont, SampleLoader, HttpStorage } = lib() as {
-      Soundfont: (context: BaseAudioContext, options: Record<string, unknown>) => unknown;
-      SampleLoader: (context: BaseAudioContext, options?: Record<string, unknown>) => unknown;
+    const smplrModule = lib() as unknown as {
+      Instrument: (
+        plugin: (ctx: BaseAudioContext, options: Record<string, unknown>, smplr: {
+          loadInstrument(json: unknown, buffers: Map<string, AudioBuffer>): Promise<unknown>;
+        }) => unknown,
+      ) => (context: BaseAudioContext, options: Record<string, unknown>) => KitInstrument;
       HttpStorage?: KitStorageFetch;
+      soundfontToPreset: (noteNames: string[], loopData?: unknown) => unknown;
+      decodeKit?: (url: string) => Promise<KitDecode>;
     };
-    const loader = SampleLoader(context);
+    const { Instrument, HttpStorage, soundfontToPreset } = smplrModule;
     const kit = new URL(config.engine.kitUrl, ASSET_BASE).href;
     // Whatever smplr does in parallel, the ~2.6 MB kit text is downloaded once.
     const storage = HttpStorage ? onceFetchStore(HttpStorage) : undefined;
-    const spread = config.panning.spread;
 
-    // One instrument per string. All share the same loader; each instance's
-    // destination is its own gate → panner chain, giving every string a fixed
-    // stereo seat into the master bus.
+    // ONE decode for the whole kit (six Soundfont instances would decode the
+    // kit SIX TIMES — 528 OGG frames — which is what made a fresh page's first
+    // play land on the synth fallback on slower devices). The decode also
+    // reports live progress (the old smplr progress only ticked AFTER all
+    // decodes, so it read 0/0 through the whole decode phase).
+    const decode = smplrModule.decodeKit
+      ? smplrModule.decodeKit(kit)
+      : decodeKitOnce(context, kit, (loaded, total) => {
+        this.progress.loaded = loaded;
+        this.progress.total = total;
+      });
+
+    const spread = config.panning.spread;
+    // One instrument per string. All share the decoded buffer map; each
+    // instance's destination is its own gate → panner chain, giving every
+    // string a fixed stereo seat into the master bus.
     const verses: Promise<unknown>[] = [];
     for (let stringIndex = 0; stringIndex < 6; stringIndex++) {
       const gate = context.createGain();
@@ -140,12 +236,15 @@ export class SmplrGuitarEngine {
       // Fixed seat (unlike the synth's count-relative pan): the physical low
       // E always sits left, the high E right, spread by `config.panning.spread`.
       panner.pan.value = ((stringIndex / 5) * 2 - 1) * spread;
-      const inst = Soundfont(context, {
-        instrumentUrl: kit,
-        loader,
+      const inst = Instrument(
+        (_ctx, _opts, smplr) =>
+          decode.then(({ buffers, noteNames }) =>
+            smplr.loadInstrument(soundfontToPreset(noteNames), buffers),
+          ),
+      )(context, {
+        destination: gate,
         storage,
         volume: 127,
-        destination: gate,
         onLoadProgress: ({ loaded, total }: { loaded: number; total: number }) => {
           this.progress.loaded = loaded;
           this.progress.total = total;
