@@ -137,7 +137,7 @@
   <p id="smpStatus">no samples recorded — synth playback</p>
 
   <script type="module">
-    import { playVoicing, stopAudio, debugTap, getAudioDebugEvents, renderOfflineVoicing, configSnapshot, setBodyIRFromPcm, clearBodyIR, setBodyIRLevel, getBodyIRStatus, getBodyIRWav, prewarm, setSample, clearSamples, setSamplesEnabled, getSamplesStatus, getSampleWav, setEngineMode, getSmplrStatus } from "../dist/audio.js";
+    import { playVoicing, stopAudio, debugTap, getAudioDebugEvents, renderOfflineVoicing, configSnapshot, setBodyIRFromPcm, clearBodyIR, setBodyIRLevel, getBodyIRStatus, getBodyIRWav, prewarm, preloadGuitarEngine, setSample, clearSamples, setSamplesEnabled, getSamplesStatus, getSampleWav, setEngineMode, getSmplrStatus } from "../dist/audio.js";
 
     const TUNING = [40, 45, 50, 55, 59, 64];
     const PRESETS = {
@@ -937,6 +937,20 @@ loadSaved();
         }
       }),
     );
+    // Optional ?engine=smplr|samples|synth forces a mode on load (handy when
+    // scripting the page, e.g. headless dump-dom probes).
+    const forced = new URLSearchParams(location.search).get("engine");
+    if (forced && ["smplr", "samples", "synth"].includes(forced)) setEngineMode(forced);
+    // The default engine is smplr: build the audio path + start the kit load on
+    // arrival (same path as picking the radio) so the first strum is the kit
+    // itself, not the fallback. Keeps the progress line live until ready.
+    if (getSmplrStatus().mode === "smplr") {
+      preloadGuitarEngine();
+      const poll = setInterval(() => {
+        refreshEngine();
+        if (getSmplrStatus().ready) clearInterval(poll);
+      }, 250);
+    }
     refreshEngine();
   </script>
 </body>

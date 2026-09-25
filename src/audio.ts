@@ -150,6 +150,17 @@ export function prewarm(): void {
 }
 
 /**
+ * Build the audio graph AND start loading the smplr kit at page load (no user
+ * gesture needed — the context is created suspended and only the fetch/decode
+ * runs in the background), so the FIRST play already routes to the kit instead
+ * of the samples/synth fallback. Called on init by the app and the debug
+ * harness whenever the default engine is smplr.
+ */
+export function preloadGuitarEngine(): void {
+  void ensure();
+}
+
+/**
  * Switch the guitar engine live (used by the debug harness's engine selector
  * and the scheduling test): writes the mode and, when switching TO the smplr
  * kit, starts building the engine so the next play can route to it. Switching

@@ -1,4 +1,4 @@
-import { stopAudio, playNotes, playVoicing } from "./audio.js";
+import { stopAudio, playNotes, playVoicing, preloadGuitarEngine } from "./audio.js";
 import { DEFAULT_CONFIG } from "./synth/config.js";
 import { findFingerings, type Fingering } from "./fretboard.js";
 import { findPianoVoicings, type PianoVoicing } from "./piano.js";
@@ -29,6 +29,11 @@ function isPianoChord(chord: GuitarSongChord | PianoSongChord): chord is PianoSo
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  // Start the audio graph + smplr kit fetch/decode right away (no gesture
+  // needed: the context is created suspended) so the FIRST voicing click
+  // already plays the real guitar kit instead of the samples/synth fallback
+  // that lazily-built engines cause on the first play.
+  if (DEFAULT_CONFIG.engine.mode === "smplr") preloadGuitarEngine();
   const noteGrid = document.getElementById("note-grid") as HTMLDivElement;
   const notePicker = document.getElementById("note-picker") as HTMLDivElement;
   const modeSelect = document.getElementById("mode") as HTMLSelectElement;
