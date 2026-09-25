@@ -747,7 +747,38 @@ export function playVoicing(frets: (number | null)[], tuning: number[]): void {
   schedule(async () => {
     await ensure();
     if (!context || !graph) return;
+    // If the kit is still decoding, hold the FIRST play for it (bounded) so it
+    // routes to the kit instead of the samples/synth fallback — the race that
+    // made the very first click of a session sound like the old engine. A
+    // stuck/failed kit times out into today's fallback after 8s.
+    await awaitKitIfLoading(8000);
     scheduleGuitarVoicing(context, graph, frets, tuning, config, context.currentTime + NOTE_START);
+  });
+}
+
+/**
+ * Wait (bounded) while the smplr kit engine is built but not yet decoded, so a
+ * play that arrives during the first-load decode rides the kit instead of the
+ * fallback. Resolves immediately when there's no kit to wait on; the timeout
+ * only guards against a genuinely stuck kit silently delaying a click forever.
+ */
+async function awaitKitIfLoading(maxMs: number): Promise<void> {
+  if (!guitarEngine || guitarEngineReady) return;
+  if (DEFAULT_CONFIG.engine.mode !== "smplr") return;
+  const engine = guitarEngine;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(() => resolve(), maxMs);
+    void engine.ready.then(
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      () => {
+        // `ready` rejection already nulls guitarEngine (fallback takes over).
+        clearTimeout(timer);
+        resolve();
+      },
+    );
   });
 }
 
@@ -1027,11 +1058,15 @@ export function stopAudio(): void {
 export function getSmplrStatus(): {
   mode: PluckAudioConfig["engine"]["mode"];
   ready: boolean;
+  /** Engine built and its kit decode still running (the app holds the first
+   *  play for it). False when there's no engine yet or it's ready. */
+  loading: boolean;
   progress: { loaded: number; total: number };
 } {
   return {
     mode: DEFAULT_CONFIG.engine.mode,
     ready: guitarEngineReady,
+    loading: guitarEngine !== null && !guitarEngineReady,
     progress: guitarEngine ? { ...guitarEngine.progress } : { loaded: 0, total: 0 },
   };
 }

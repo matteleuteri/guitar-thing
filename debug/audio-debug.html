@@ -106,8 +106,8 @@
     steel-guitar sample (self-hosted <code>assets/guitar-steel-ogg.js</code>, ~2.6 MB,
     decoded once into six per-string instruments); <b>recorded samples</b> plays your
     open-string recordings below; <b>K–S synth</b> is the Karplus–Strong fallback. The
-    first play after picking smplr loads the kit (that play falls back); strum again
-    for the kit.</p>
+    kit is pre-loaded on page load; a play that lands mid-decode waits for it (up to
+    ~8s) so the first sound is the kit — only a stuck/failed kit falls back.</p>
   <div class="row">
     <label for="engSmplr"><input type="radio" name="engine" id="engSmplr" value="smplr" /> smplr kit</label>
     <label for="engSamples"><input type="radio" name="engine" id="engSamples" value="samples" /> recorded samples</label>
@@ -919,7 +919,11 @@ loadSaved();
         st.mode === "smplr"
           ? st.ready
             ? "smplr kit loaded & ready — 6 per-string instruments on their own gates + seats"
-            : (p.total ? `smplr kit loading… ${p.loaded}/${p.total} samples` : "smplr kit loading (first play primes it)…")
+            : p.total
+              ? `smplr kit loading… ${p.loaded}/${p.total} samples`
+              : st.loading
+                ? "smplr kit decoding… (engine built; the first play waits for it, up to ~8s)"
+                : "smplr kit not loaded — the first play builds + decodes it"
           : st.mode === "samples"
             ? "recorded-sample engine (K–S synth fills the gaps) — smplr kit " + (st.ready ? "loaded" : "not loaded")
             : "Karplus–Strong synth engine — smplr kit " + (st.ready ? "loaded" : "not loaded");

@@ -60,9 +60,19 @@ sits a fixed stereo seat (low E left → high E right). Engine select
 `config.engine.mode` (`"smplr" | "samples" | "synth"`, default `"smplr"`) plus
 `setEngineMode()` (exported; the harness radio uses it); the K–S synth and the
 recorded-string bank remain selectable for A/B and double as fallbacks while
-the kit loads or for notes no sample covers. First play after picking smplr
-primes the kit (that one play falls back — same first-click lag as the worklet
-module). The kit path is exercised by `scripts/audio-sched.mjs` via
+the kit loads or for notes no sample covers. The kit is **pre-loaded on page
+load** (`preloadGuitarEngine()` — builds the graph + starts the 2.6 MB
+fetch/decode on `DOMContentLoaded`, no gesture needed; the context is simply
+created suspended), and a play that lands mid-decode **waits for it, bounded**
+(`awaitKitIfLoading(8000)` in `playVoicing`) so the very first click of a
+session routes to the kit instead of the samples/synth fallback — the race
+that made a fresh page's first strum sound like the old engine. A stuck/failed
+kit times out into the fallback after ~8s. `getSmplrStatus()` reports
+`{ mode, ready, loading, progress }`; "loading" means the engine is built but
+decoding (smplr's progress only ticks AFTER each instance's decode, so it
+reads 0/0 through the whole decode phase — the harness status text says
+"kit decoding…" during it). The kit path is exercised by
+`scripts/audio-sched.mjs` via
 `globalThis.__SMPLR_FAKE__` (a stub smplr that records `start()` calls — the
 real package would fetch/decode a 2.6 MB kit under Node), asserted: six kit
 voices, notes = fretted midis, root/color velocities, fixed distinct pans,
@@ -763,9 +773,10 @@ register work is parked; guitar realism is the active thread. Candidate leads:
     `setEngineMode()` switches live and primes the kit; `getSmplrStatus()`
     feeds the harness's progress line; debug events gain `kind: "kit"` +
     `velocity`. The recorded bank and the K–S synth remain selectable and act
-    as fallbacks (kit still decoding → the click that primes it plays
-    fallback, like the worklet's first-click lag; not ready → samples if a
-    bank exists, else synth). Offline render (harness Compare) builds its
+    as fallbacks (kit mid-decode → the play waits up to 8s via
+    `awaitKitIfLoading`, then either rides the kit or falls back; not ready →
+    samples if a bank exists, else synth). Offline render (harness Compare)
+    builds its
     own engine sharing nothing but config when mode is smplr, and falls back to
     synth if the kit can't load offline. `scripts/audio-sched.mjs` stubs smplr
     via `globalThis.__SMPLR_FAKE__` (records `start()` calls — the real
