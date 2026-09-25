@@ -146,8 +146,17 @@ function decodeKitOnce(
         onProgress?.(buffers.size, noteNames.length);
       }),
     );
+    // Only the notes that actually decoded make it into the preset — the same
+    // rule smplr's own Soundfont uses — so a failed OGG never becomes a preset
+    // region pointing at a missing buffer (which would send the loader on a
+    // phantom fetch of a non-existent sample file).
     return { buffers, noteNames: [...buffers.keys()] };
   })();
+  // A rejected decode must not poison the cache: the engine's bounded retry
+  // would otherwise keep reusing a dead promise instead of fetching again.
+  void decoding.catch(() => {
+    if (decodeCache.get(context) === decoding) decodeCache.delete(context);
+  });
   decodeCache.set(context, decoding);
   return decoding;
 }

@@ -117,7 +117,7 @@ function ensure(): Promise<void> {
  * and leave `guitarEngine` null — scheduling then falls back to the recorded
  * samples / K–S synth, which never depend on it.
  */
-function primeGuitarEngine(): void {
+function primeGuitarEngine(attempt = 0): void {
   if (guitarEngine || !context || !graph) return;
   if (DEFAULT_CONFIG.engine.mode !== "smplr") return;
   try {
@@ -133,6 +133,11 @@ function primeGuitarEngine(): void {
         console.warn("smplr guitar kit failed to load, staying on samples/synth:", err);
         guitarEngine = null;
         guitarEngineReady = false;
+        // A transient failure (the 2.6 MB kit fetch cut off mid-flight on a
+        // slow connection) gets one bounded retry before this session settles
+        // on the fallback. The rejected decode is cleared from the cache, so
+        // the retry fetches + decodes fresh.
+        if (attempt < 1) setTimeout(() => primeGuitarEngine(attempt + 1), 1500);
       });
   } catch (err) {
     console.warn("smplr guitar engine failed to build:", err);
