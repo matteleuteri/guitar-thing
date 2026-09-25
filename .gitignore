@@ -4,3 +4,5 @@ _site/
 *.log
 .DS_Store
 Thumbs.db
+# Per-session audio comparison stats saved by the debug harness
+debug/comparisons.json

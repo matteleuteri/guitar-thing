@@ -30,6 +30,7 @@ jobs:
           cp index.html style.css _site/
           cp -r dist _site/
           cp -r debug _site/
+          cp -r assets _site/ 2>/dev/null || true
           touch _site/.nojekyll
       - uses: actions/upload-pages-artifact@v3
         with:

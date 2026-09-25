@@ -1,6 +1,8 @@
 /**
  * Shared post-string signal path. Notes sum into a single bus, get shaped by
- * the guitar "body" EQ, then split into a dry path and a short room tail.
+ * the guitar "body" EQ, then — when a *recorded* body IR is loaded — get
+ * convolved through the real guitar top's impulse response (the recorded-IR
+ * body, AGENTS.md progress 19), then split into a dry path and a room tail.
  */
 
 import type { PluckAudioConfig } from "./config.js";
@@ -10,9 +12,12 @@ export interface SharedGraph {
   master: GainNode;
   /** All plucked notes connect here. */
   voiceIn: GainNode;
+  /** Recorded body-IR convolver. Needs a buffer + wet level set by the host;
+   *  with no IR loaded the wet gain stays 0 and the path is pure bypass. */
+  ir: { con: ConvolverNode; wet: GainNode };
 }
 
-function peaking(context: AudioContext, freq: number, gainDb: number, q: number): BiquadFilterNode {
+function peaking(context: BaseAudioContext, freq: number, gainDb: number, q: number): BiquadFilterNode {
   const filter = context.createBiquadFilter();
   filter.type = "peaking";
   filter.frequency.value = freq;
@@ -22,7 +27,7 @@ function peaking(context: AudioContext, freq: number, gainDb: number, q: number)
 }
 
 /** Build the shared bus → body EQ → dry + room → master graph. */
-export function buildSharedGraph(context: AudioContext, config: PluckAudioConfig): SharedGraph {
+export function buildSharedGraph(context: BaseAudioContext, config: PluckAudioConfig): SharedGraph {
   // Master bus (kept low so many voices can stack without clipping).
   const master = context.createGain();
   master.gain.value = 0.7;
@@ -34,10 +39,24 @@ export function buildSharedGraph(context: AudioContext, config: PluckAudioConfig
   voiceIn.connect(bodyLow);
   bodyLow.connect(presence);
 
+  // Every string rings the recorded body (progress 19): a ConvolverNode fed by
+  // the real guitar's IR. With no IR loaded the wet gain is 0 and the path is
+  // pure bypass, so the approved no-IR sound is untouched. The host (audio.ts)
+  // sets `ir.con.buffer` + `ir.wet.gain.value` once the IR is available.
+  const afterBody = context.createGain();
+  presence.connect(afterBody);
+  const irWet = context.createGain();
+  irWet.gain.value = 0;
+  const irCon = context.createConvolver();
+  irCon.normalize = false; // we peak-normalize the IR ourselves; keep levels exact
+  presence.connect(irWet);
+  irWet.connect(irCon);
+  irCon.connect(afterBody);
+
   // Dry path straight to the master.
   const dry = context.createGain();
   dry.gain.value = 1;
-  presence.connect(dry);
+  afterBody.connect(dry);
   dry.connect(master);
 
   // Room tail: one feedback delay, dampened darkly in its own loop.
@@ -51,7 +70,7 @@ export function buildSharedGraph(context: AudioContext, config: PluckAudioConfig
   feedback.gain.value = config.room.feedback;
   const wet = context.createGain();
   wet.gain.value = config.room.wet;
-  presence.connect(roomIn);
+  afterBody.connect(roomIn);
   roomIn.connect(delay);
   delay.connect(damp);
   damp.connect(feedback);
@@ -70,5 +89,5 @@ export function buildSharedGraph(context: AudioContext, config: PluckAudioConfig
   master.connect(compressor);
   compressor.connect(context.destination);
 
-  return { master, voiceIn };
+  return { master, voiceIn, ir: { con: irCon, wet: irWet } };
 }

@@ -10,7 +10,13 @@
     .row { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
     button { background: #2a2a2a; color: #e6e6e6; border: 1px solid #444; border-radius: 4px; padding: 5px 12px; font: inherit; font-size: 12px; cursor: pointer; }
     button:hover { background: #3a3a3a; }
-    #env { width: 640px; height: 140px; background: #0c0c0c; border: 1px solid #333; }
+    #env, #ref, #strip { width: 640px; background: #0c0c0c; border: 1px solid #333; }
+    #env { height: 140px; }
+    #ref { height: 140px; }
+    #strip { height: 56px; margin-top: 4px; }
+    input[type="range"] { width: 180px; accent-color: #8ec9ff; }
+    input[type="text"] { background: #222; color: #e6e6e6; border: 1px solid #444; border-radius: 4px; padding: 4px 8px; font: inherit; font-size: 12px; flex: 1; min-width: 120px; }
+    label { font-size: 11px; color: #888; }
     pre { font-size: 12px; line-height: 1.5; background: #0c0c0c; border: 1px solid #333; padding: 8px; min-height: 80px; white-space: pre-wrap; }
   </style>
 </head>
@@ -30,7 +36,12 @@
       <option value="openEm">Em open [0 2 2 0 0 0]</option>
       <option value="openA">A open [0 0 2 2 2 0]</option>
       <option value="barreF">F barre [1 3 3 2 1 1]</option>
-      <option value="single">Single E2 (one string)</option>
+      <option value="e2">E2 open (string 1)</option>
+      <option value="a2">A2 open (string 2)</option>
+      <option value="d3">D3 open (string 3)</option>
+      <option value="g3">G3 open (string 4)</option>
+      <option value="b3">B3 open (string 5)</option>
+      <option value="e4">E4 open (string 6)</option>
     </select>
     <button id="strum">Strum</button>
     <button id="stop">Stop</button>
@@ -41,8 +52,92 @@
   <p id="status">idle</p>
   <pre id="out"></pre>
 
+  <h1>Real-guitar comparison</h1>
+  <p class="hint">Record a clean strum of the selected chord through your mic (or load a .wav/.mp3),
+    then <b>Compare vs synth</b>: the real synth renders offline and its envelope/decay is
+    overlaid on your recording. The mic is for reference only — nothing plays during recording.
+    Start with the single-string presets (E2..E4): one note isolates that string's decay so you
+    can tune it before chords blend everything.</p>
+  <div class="row">
+    <button id="rec">Record (mic)</button>
+    <button id="load">Load audio file…</button>
+    <input type="file" id="file" accept="audio/*" hidden />
+    <button id="compare">Compare vs synth</button>
+    <button id="playRef">Play reference</button>
+    <button id="playSynth">Play synth</button>
+  </div>
+  <div class="row"><canvas id="ref" width="640" height="140"></canvas></div>
+  <div class="row"><canvas id="strip" width="640" height="56"></canvas></div>
+  <div class="row">
+    <label for="cropStart">Start</label>
+    <input id="cropStart" type="range" min="0" max="1" step="0.05" disabled />
+    <span id="cropStartLabel">0.00s</span>
+    <label for="cropEnd">End</label>
+    <input id="cropEnd" type="range" min="0" max="1" step="0.05" disabled />
+    <span id="cropEndLabel">0.00s</span>
+    <span class="hint">crop out lead-in/tail noise on the reference</span>
+  </div>
+  <div class="row">
+    <input id="note" type="text" placeholder="note (optional) — e.g. 'lowered sustain, raised decay on D3'" />
+    <button id="save">Save stats</button>
+  </div>
+  <pre id="saved"></pre>
+  <p id="refStatus">no reference yet</p>
+
+  <h1>Recorded body IR</h1>
+  <p class="hint">The synth's "box" is a static EQ — the one thing keeping it from sounding
+    like a guitar (progress 13: synthetic body IRs wobbled by ear, twice). Capture a real one:
+    click <b>Capture body IR</b>, wait for the prompt, knock gently on the top near the bridge.
+    It auto-finds the knock, auto-crops, and applies it to the whole synth. (That's the one-click
+    path. Fine control: record normally, crop Start/End over the strip, then "Set crop as body IR".)</p>
+  <div class="row">
+    <button id="captureIR">Capture body IR</button>
+    <button id="setIR">Set crop as body IR</button>
+    <button id="clearIR">Clear body IR</button>
+    <button id="dlIR">Download IR .wav</button>
+    <label for="irLevel">IR mix</label>
+    <input id="irLevel" type="range" min="0" max="100" step="5" value="50" title="dry + IR wet blend" />
+    <span id="irLevelLabel">0.50</span>
+  </div>
+  <p id="irStatus">no body IR loaded (static EQ body)</p>
+
+  <h1>Guitar engine</h1>
+  <p class="hint">Which engine produces guitar voicings. <b>smplr kit</b> plays a real GM
+    steel-guitar sample (self-hosted <code>assets/guitar-steel-ogg.js</code>, ~2.6 MB,
+    decoded once into six per-string instruments); <b>recorded samples</b> plays your
+    open-string recordings below; <b>K–S synth</b> is the Karplus–Strong fallback. The
+    first play after picking smplr loads the kit (that play falls back); strum again
+    for the kit.</p>
+  <div class="row">
+    <label for="engSmplr"><input type="radio" name="engine" id="engSmplr" value="smplr" /> smplr kit</label>
+    <label for="engSamples"><input type="radio" name="engine" id="engSamples" value="samples" /> recorded samples</label>
+    <label for="engSynth"><input type="radio" name="engine" id="engSynth" value="synth" /> K–S synth</label>
+  </div>
+  <p id="engStatus">checking…</p>
+
+  <h1>Sample playback (your own guitar)</h1>
+  <p class="hint">Stop synthesizing a guitar and just use yours: record the six open
+    strings once, each in one click. Every voicing is then played by transposing the
+    <b>nearest recorded string</b> to the fretted note, so the whole fretboard comes out
+    of these six recordings (~a few semitones max). Pluck cleanly, hold, let it ring,
+    press the button again to stop. Clear the body IR above too — samples carry their
+    own body.</p>
+  <div class="row">
+    <button data-sample="0">E2</button>
+    <button data-sample="1">A2</button>
+    <button data-sample="2">D3</button>
+    <button data-sample="3">G3</button>
+    <button data-sample="4">B3</button>
+    <button data-sample="5">E4</button>
+    <label for="useSamples">Use samples</label>
+    <input id="useSamples" type="checkbox" />
+    <button id="clearSMP">Clear samples</button>
+    <button id="dlSMP">Download all .wav</button>
+  </div>
+  <p id="smpStatus">no samples recorded — synth playback</p>
+
   <script type="module">
-    import { playVoicing, playNotes, stopAudio, debugTap, getAudioDebugEvents } from "../dist/audio.js";
+    import { playVoicing, stopAudio, debugTap, getAudioDebugEvents, renderOfflineVoicing, configSnapshot, setBodyIRFromPcm, clearBodyIR, setBodyIRLevel, getBodyIRStatus, getBodyIRWav, prewarm, setSample, clearSamples, setSamplesEnabled, getSamplesStatus, getSampleWav, setEngineMode, getSmplrStatus } from "../dist/audio.js";
 
     const TUNING = [40, 45, 50, 55, 59, 64];
     const PRESETS = {
@@ -51,6 +146,17 @@
       openEm: [0, 2, 2, 0, 0, 0],
       openA: [0, 0, 2, 2, 2, 0],
       barreF: [1, 3, 3, 2, 1, 1],
+      // One open string at a time: isolates each string's decay/brightness so
+      // per-string knobs can be tuned before the whole chord blends them.
+      e2: [0, null, null, null, null, null],
+      a2: [null, 0, null, null, null, null],
+      d3: [null, null, 0, null, null, null],
+      g3: [null, null, null, 0, null, null],
+      b3: [null, null, null, null, 0, null],
+      e4: [null, null, null, null, null, 0],
+    };
+    const PRESET_LABELS = {
+      e2: "E2", a2: "A2", d3: "D3", g3: "G3", b3: "B3", e4: "E4", openC: "C", openG: "G", openEm: "Em", openA: "A", barreF: "F",
     };
     const NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
     const NOTE_FREQ = (m) => 440 * Math.pow(2, (m - 69) / 12);
@@ -74,13 +180,8 @@
       stopAudio();
       tap = debugTap();
       if (tap) tap.fftSize = 1024; // 21ms window -> fine enough to resolve strum steps
-      if (preset === "single") {
-        playNotes([40]);
-        status.textContent = "played single E2";
-      } else {
-        playVoicing(PRESETS[preset], TUNING);
-        status.textContent = "played " + preset + " (" + PRESETS[preset].filter((f) => f !== null).length + " strings)";
-      }
+      playVoicing(PRESETS[preset], TUNING);
+      status.textContent = "played " + preset + " (" + PRESETS[preset].filter((f) => f !== null).length + " strings)";
     }
 
     $("strum").addEventListener("click", () => {
@@ -156,6 +257,8 @@
               " dc=" + e.decay.toFixed(2) + " s=" + e.sustain.toFixed(5) +
               " pk=" + e.pick.toFixed(2) + " pb=" + e.pickBright.toFixed(2) +
               " pd=" + e.pickDecayMs.toFixed(1) +
+              " life=" + e.lifeAmt.toFixed(4) + " thump=" + e.thump.toFixed(2) +
+              " bl=" + e.bloom.toFixed(2) +
               " att=" + e.attackMs + "ms  ~" + nameOf(e.freq));
         }
         const spacing = evs.length > 1 ? (evs[1].time - evs[0].time) * 1000 : 0;
@@ -188,6 +291,653 @@
     // Auto-strum on load so headless verification works too.
     setTimeout(() => { strum("openC"); }, 120);
     setTimeout(() => $("analyze").click(), 160);
+
+    // -----------------------------------------------------------------------
+    // Real-guitar comparison: record / load a clip, render the synth offline,
+    // overlay the RMS envelopes (dB below each signal's own peak) so the decay
+    // curves can be compared and the knobs tuned with numbers.
+    // -----------------------------------------------------------------------
+    const refCanvas = $("ref");
+    const rctx = refCanvas.getContext("2d");
+    const stripCanvas = $("strip");
+    const sctx = stripCanvas.getContext("2d");
+    const cropStart = $("cropStart");
+    const cropEnd = $("cropEnd");
+    const cropStartLabel = $("cropStartLabel");
+    const cropEndLabel = $("cropEndLabel");
+    const refStatus = $("refStatus");
+    let reference = null; // { data: Float32Array, sampleRate: number, label: string, crop: {start,end} }
+    let lastRefBins = null;   // onset-aligned bins of the cropped reference
+    let lastRefStats = null;  // enriched stats of the cropped reference
+    let lastSynthBins = null;
+    let lastSynthStats = null;
+    let lastSynthLabel = null;
+    let lastSynthConfig = null; // DEFAULT_CONFIG snapshot at render time
+    let recTicker = null;
+    let refCtx = null;
+    let recorder = null;
+    let mediaStream = null;
+    let refBuffer = null;     // decoded reference, ready to play
+    let synthBuffer = null;   // last offline render, converted to a playable buffer
+    let playingSource = null; // whichever source is sounding now
+    let statusBeforePlay = "";
+    const PLAY_LABELS = { playRef: "Play reference", playSynth: "Play synth" };
+
+    function stopPlayback() {
+      if (playingSource) {
+        try { playingSource.stop(); playingSource.disconnect(); } catch { /* already ended */ }
+        playingSource = null;
+      }
+      refStatus.textContent = statusBeforePlay;
+      for (const [id, label] of Object.entries(PLAY_LABELS)) $(id).textContent = label;
+    }
+
+    /** Play a buffer through the decode context; stops whatever's playing. */
+    function playSource(buffer) {
+      stopPlayback();
+      refCtx?.resume();
+      const src = refCtx.createBufferSource();
+      src.buffer = buffer;
+      src.onended = () => { playingSource = null; for (const [id, label] of Object.entries(PLAY_LABELS)) $(id).textContent = label; };
+      src.connect(refCtx.destination);
+      src.start();
+      playingSource = src;
+    }
+
+    function decodeToMono(arrayBuffer) {
+      refCtx ??= new AudioContext();
+      return refCtx.decodeAudioData(arrayBuffer).then((buf) => {
+        const chans = [];
+        for (let c = 0; c < buf.numberOfChannels; c++) chans.push(buf.getChannelData(c));
+        const data = new Float32Array(buf.length);
+        for (let i = 0; i < data.length; i++) {
+          let sum = 0;
+          for (const ch of chans) sum += ch[i];
+          data[i] = sum / chans.length;
+        }
+        return { data, sampleRate: buf.sampleRate };
+      });
+    }
+
+    /** 10ms RMS bins over the whole clip. */
+    function rmsBins(data, sampleRate) {
+      const step = Math.floor(sampleRate * 0.01);
+      const bins = [];
+      for (let start = 0; start < data.length; start += step) {
+        let sum = 0;
+        for (let i = start; i < Math.min(start + step, data.length); i++) sum += data[i] * data[i];
+        bins.push(Math.sqrt(sum / Math.min(step, data.length - start)));
+      }
+      return bins;
+    }
+
+    /** Onset is the first clear 5%-of-peak rise; shift so it sits at t=0. */
+    function onsetAligned(bins) {
+      const max = Math.max(...bins, 1e-9);
+      let on = 0;
+      for (let i = 3; i < bins.length; i++) if (bins[i] > max * 0.05) { on = i; break; }
+      return bins.slice(on);
+    }
+
+    /** Decay stats: ms from peak to -20 dB and -40 dB of the value at peak. */
+    function decayStats(bins, stepMs) {
+      let peakIdx = 0;
+      for (let i = 1; i < bins.length; i++) if (bins[i] > bins[peakIdx]) peakIdx = i;
+      const at = (db) => {
+        const floor = bins[peakIdx] * Math.pow(10, db / 20);
+        for (let i = peakIdx; i < bins.length; i++) if (bins[i] < floor) return (i - peakIdx) * stepMs;
+        return (bins.length - peakIdx - 1) * stepMs;
+      };
+      return { peakIdx, peakMs: peakIdx * stepMs, d20: at(-20), d40: at(-40) };
+    }
+
+    /** Largest |sample| in a Float32Array (loop, avoids spread stack limits). */
+    function peakAbs(data) {
+      let m = 0;
+      for (let i = 0; i < data.length; i++) { const a = Math.abs(data[i]); if (a > m) m = a; }
+      return +m.toFixed(5);
+    }
+
+    /** dB below the bin peak, per 10ms bin, rounded to 1dp — the save-file envelope. */
+    function dbEnvelope(bins) {
+      const peak = Math.max(...bins, 1e-9);
+      return bins.map((b) => Math.round(20 * Math.log10(b / peak) * 10) / 10);
+    }
+
+    /** Decay stats plus an envelope trace; `peakAbs` is the absolute level. */
+    function statsPlus(bins, stepMs, peakAbsValue) {
+      const s = decayStats(bins, stepMs);
+      const env = dbEnvelope(bins);
+      const at = (sec) => {
+        const i = s.peakIdx + Math.round((sec * 1000) / stepMs);
+        return i < env.length ? env[i] : null;
+      };
+      return { attackMs: s.peakMs, d20: s.d20, d40: s.d40, peakAbs: peakAbsValue, dbAt1s: at(1), dbAt2s: at(2), dbAt5s: at(5), env };
+    }
+
+    function drawOverlay(refBins, synthBins, refLabel, synthLabel) {
+      rctx.clearRect(0, 0, refCanvas.width, refCanvas.height);
+      const w = refCanvas.width, h = refCanvas.height;
+      const dBFloor = -70;
+      const plot = (bins, color, label) => {
+        const max = Math.max(...bins, 1e-9);
+        rctx.strokeStyle = color;
+        rctx.lineWidth = 1.5;
+        rctx.beginPath();
+        for (let i = 0; i < bins.length; i++) {
+          const db = Math.max(dBFloor, 20 * Math.log10(bins[i] / max));
+          const x = (i / Math.max(bins.length, 1)) * w;
+          const y = h - ((db - dBFloor) / -dBFloor) * (h - 16) - 4;
+          i === 0 ? rctx.moveTo(x, y) : rctx.lineTo(x, y);
+        }
+        rctx.stroke();
+        rctx.fillStyle = color;
+        rctx.font = "10px monospace";
+        rctx.fillText(label, 6, color === "#4caf50" ? 20 : 34);
+      };
+      plot(refBins, "#ffb054", refLabel);
+      plot(synthBins, "#4caf50", synthLabel);
+      rctx.strokeStyle = "#555";
+      rctx.beginPath(); rctx.moveTo(0, h - 4); rctx.lineTo(w, h - 4); rctx.stroke();
+      rctx.fillStyle = "#666";
+      rctx.font = "10px monospace";
+      rctx.fillText("Y = dB below each signal's own peak (0dB top). Assumed 10ms/bin. X normalized to onset.", 6, h - 18);
+    }
+
+    /** Keep a copy of a mono Float32Array as a playable AudioBuffer. */
+    function monoToBuffer(data, sampleRate) {
+      refCtx ??= new AudioContext();
+      const buf = refCtx.createBuffer(1, data.length, sampleRate);
+      buf.copyToChannel(data, 0);
+      return buf;
+    }
+
+    /** The reference sample range inside the crop window, as a Float32Array. */
+    function windowedData() {
+      const sr = reference.sampleRate;
+      const start = Math.round((reference.crop.start || 0) * sr);
+      const end = Math.round((reference.crop.end || reference.data.length / sr) * sr);
+      return reference.data.slice(start, Math.max(start + 1, end));
+    }
+
+    /** Full-clip RMS strip with the crop window shaded (x = seconds). */
+    function drawStrip() {
+      sctx.clearRect(0, 0, stripCanvas.width, stripCanvas.height);
+      const w = stripCanvas.width, h = stripCanvas.height;
+      const bins = rmsBins(reference.data, reference.sampleRate);
+      const max = Math.max(...bins, 1e-9);
+      const total = bins.length * 0.01; // seconds
+      const xOf = (t) => (t / total) * w;
+      // Shade the crop window first.
+      const cx0 = xOf(reference.crop.start);
+      const cx1 = xOf(Math.min(reference.crop.end, total));
+      sctx.fillStyle = "rgba(255,176,84,0.14)";
+      sctx.fillRect(cx0, 0, cx1 - cx0, h);
+      sctx.strokeStyle = "#ffb054";
+      sctx.lineWidth = 1;
+      sctx.beginPath(); sctx.moveTo(cx0, 0); sctx.lineTo(cx0, h); sctx.stroke();
+      sctx.beginPath(); sctx.moveTo(cx1, 0); sctx.lineTo(cx1, h); sctx.stroke();
+      // Envelope of the whole clip.
+      sctx.strokeStyle = "#8ec9ff";
+      sctx.lineWidth = 1;
+      sctx.beginPath();
+      for (let i = 0; i < bins.length; i++) {
+        const db = Math.max(-60, 20 * Math.log10(bins[i] / max));
+        const x = (i / bins.length) * w;
+        const y = h - ((db + 60) / 60) * (h - 8) - 2;
+        i === 0 ? sctx.moveTo(x, y) : sctx.lineTo(x, y);
+      }
+      sctx.stroke();
+      sctx.fillStyle = "#666";
+      sctx.font = "10px monospace";
+      sctx.fillText("0s", 4, 10);
+      sctx.fillText(total.toFixed(1) + "s", w - 30, 10);
+      sctx.fillText("crop " + reference.crop.start.toFixed(2) + ".." + reference.crop.end.toFixed(2) + "s", 40, 10);
+    }
+
+    /** Re-analyze the reference inside the crop window and refresh the plots. */
+    function refreshReference() {
+      const data = windowedData();
+      const bins = onsetAligned(rmsBins(data, reference.sampleRate));
+      lastRefBins = bins;
+      lastRefStats = statsPlus(bins, 10, peakAbs(data));
+      drawStrip();
+      refStatus.textContent =
+        reference.label + " — crop " + reference.crop.start.toFixed(2) + ".." + reference.crop.end.toFixed(2) +
+        "s, attack→peak " + lastRefStats.attackMs + "ms, -20dB at " + lastRefStats.d20 +
+        "ms, -40dB at " + lastRefStats.d40 + "ms" +
+        "  (db@1/2/5s: " + [1, 2, 5].map((t) => lastRefStats["dbAt" + t + "s"] ?? "–").join("/") + ")";
+      drawOverlay(bins, lastSynthBins || [], reference.label, lastSynthLabel || "(none yet)");
+    }
+
+    /** Clamp + apply the two crop sliders; the crop IS the reference now. */
+    function syncCrop() {
+      let a = parseFloat(cropStart.value);
+      let b = parseFloat(cropEnd.value);
+      const duration = reference.data.length / reference.sampleRate;
+      if (b - a < 0.2) {
+        // Keep at least 200ms: move the handle that was just dragged.
+        const fromStart = a !== reference.crop.start;
+        if (fromStart) a = Math.max(0, b - 0.2); else b = Math.min(duration, a + 0.2);
+        cropStart.value = a;
+        cropEnd.value = b;
+      }
+      reference.crop = { start: a, end: b };
+      cropStartLabel.textContent = a.toFixed(2) + "s";
+      cropEndLabel.textContent = b.toFixed(2) + "s";
+      // Rebuild what "Play reference" plays so the crop is audible, not just plotted.
+      refBuffer = monoToBuffer(windowedData(), reference.sampleRate);
+      refreshReference();
+    }
+
+    cropStart.addEventListener("input", syncCrop);
+    cropEnd.addEventListener("input", syncCrop);
+
+    /** New reference: default the crop to the whole clip, then analyze it. */
+    function setReference(mono, label) {
+      reference = mono;
+      reference.crop = { start: 0, end: mono.data.length / mono.sampleRate };
+      const duration = reference.crop.end;
+      for (const input of [cropStart, cropEnd]) {
+        input.min = "0"; input.max = duration.toFixed(2); input.step = "0.05"; input.disabled = false;
+      }
+      cropStart.value = "0";
+      cropEnd.value = String(duration.toFixed(2));
+      cropStartLabel.textContent = "0.00s";
+      cropEndLabel.textContent = duration.toFixed(2) + "s";
+      refBuffer = monoToBuffer(reference.data, reference.sampleRate);
+      refreshReference();
+    }
+
+    async function startRecording() {
+      try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+        });
+      } catch (err) {
+        refStatus.textContent = "mic unavailable: " + err.message;
+        return;
+      }
+      const chunks = [];
+      const startTs = performance.now();
+      recorder = new MediaRecorder(mediaStream);
+      recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+      recorder.onstop = async () => {
+        clearInterval(recTicker);
+        const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+        try {
+          const mono = await decodeToMono(await blob.arrayBuffer());
+          setReference(mono, "recording (" + (mono.data.length / mono.sampleRate).toFixed(1) + "s)");
+        } catch (err) {
+          refStatus.textContent = "could not decode the recording (" + err.message + ")";
+        }
+        for (const t of mediaStream.getTracks()) t.stop();
+        mediaStream = null;
+        $("rec").textContent = "Record (mic)";
+        recorder = null;
+      };
+      recorder.start();
+      $("rec").textContent = "Stop";
+      refStatus.textContent = "recording 0.0s — strum, hold the note, then press Stop";
+      recTicker = setInterval(() => {
+        const t = ((performance.now() - startTs) / 1000).toFixed(1);
+        if (recorder && recorder.state === "recording") refStatus.textContent = "recording " + t + "s — strum, hold the note, then press Stop";
+      }, 500);
+      setTimeout(() => { if (recorder && recorder.state === "recording") recorder.stop(); }, 30000);
+    }
+
+    $("rec").addEventListener("click", () => {
+      if (recorder && recorder.state === "recording") { recorder.stop(); return; }
+      startRecording();
+    });
+
+    $("load").addEventListener("click", () => $("file").click());
+    $("file").addEventListener("change", async (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      try {
+        const mono = await decodeToMono(await file.arrayBuffer());
+        setReference(mono, file.name + " (" + (mono.data.length / mono.sampleRate).toFixed(1) + "s)");
+      } catch (err) {
+        refStatus.textContent = "could not decode " + file.name + " (" + err.message + ")";
+      }
+    });
+
+    $("compare").addEventListener("click", async () => {
+      if (!reference) { refStatus.textContent = "record or load a reference first"; return; }
+      const refText = refStatus.textContent;
+      const preset = $("preset").value;
+      const frets = PRESETS[preset];
+      const label = PRESET_LABELS[preset] ?? preset;
+      refStatus.textContent = "rendering synth offline…";
+      const seconds = Math.max(2.5, Math.min(8, reference.data.length / reference.sampleRate));
+      const rendered = await renderOfflineVoicing(frets, TUNING, seconds);
+      if (!rendered) { refStatus.textContent = "offline render failed"; return; }
+      refCtx ??= new AudioContext();
+      synthBuffer = refCtx.createBuffer(2, rendered.left.length, 48000);
+      synthBuffer.copyToChannel(rendered.left, 0);
+      synthBuffer.copyToChannel(rendered.right, 1);
+      const synthBins = onsetAligned(rmsBins(rendered.left, 48000));
+      lastSynthBins = synthBins;
+      lastSynthStats = statsPlus(synthBins, 10, peakAbs(rendered.left));
+      lastSynthLabel = "synth " + label;
+      lastSynthConfig = configSnapshot();
+      refStatus.textContent =
+        "synth " + label + " — attack→peak " + lastSynthStats.attackMs + "ms, -20dB at " + lastSynthStats.d20 + "ms, -40dB at " + lastSynthStats.d40 + "ms" +
+        "  |  real: " + refText;
+      drawOverlay(lastRefBins || [], synthBins, reference.label, lastSynthLabel);
+    });
+
+    $("save").addEventListener("click", async () => {
+      if (!reference || !lastRefStats) { refStatus.textContent = "no reference analyzed yet — record/load + compare first"; return; }
+      const record = {
+        ts: new Date().toISOString(),
+        preset: $("preset").value,
+        // Exact knobs that produced the synth curve — lets a saved "synth
+        // -40dB at 850ms" be reproduced (or blamed) with full fidelity.
+        config: lastSynthConfig,
+        ref: {
+          name: reference.label,
+          sampleRate: reference.sampleRate,
+          duration: +(reference.crop.end - reference.crop.start).toFixed(2),
+          crop: { start: +reference.crop.start.toFixed(2), end: +reference.crop.end.toFixed(2) },
+          attackMs: lastRefStats.attackMs, d20: lastRefStats.d20, d40: lastRefStats.d40,
+          dbAt1s: lastRefStats.dbAt1s, dbAt2s: lastRefStats.dbAt2s, dbAt5s: lastRefStats.dbAt5s,
+          peak: lastRefStats.peakAbs,
+          env: lastRefStats.env, // dB-below-peak envelope, 10ms bins, cropped
+        },
+        synth: lastSynthStats ? {
+          label: lastSynthLabel,
+          duration: +(lastSynthBins.length * 0.01).toFixed(2),
+          attackMs: lastSynthStats.attackMs, d20: lastSynthStats.d20, d40: lastSynthStats.d40,
+          dbAt1s: lastSynthStats.dbAt1s, dbAt2s: lastSynthStats.dbAt2s, dbAt5s: lastSynthStats.dbAt5s,
+          peak: lastSynthStats.peakAbs,
+          env: lastSynthStats.env,
+        } : null,
+        note: $("note").value.trim() || null,
+      };
+      try {
+        const res = await fetch("/debug/comparisons.json", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(record),
+        });
+        if (!res.ok) throw new Error(res.status);
+        $("note").value = "";
+        refStatus.textContent = "saved comparison";
+        await loadSaved();
+      } catch (err) {
+        refStatus.textContent = "save failed: " + err.message + " — is the local server running?";
+      }
+    });
+
+    async function loadSaved() {
+      const saved = $("saved");
+      try {
+        const res = await fetch("/debug/comparisons.json");
+        if (res.status === 404) { saved.textContent = "no saves yet — record + compare, then Save stats"; return; }
+        const recs = (await res.text()).split("\n").map((l) => l.trim()).filter(Boolean)
+          .map((l) => JSON.parse(l)).reverse(); // newest first
+        saved.textContent = recs.length
+          ? recs.map((r) => {
+              const t = new Date(r.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+              const crop = r.ref && r.ref.crop ? "crop " + r.ref.crop.start + ".." + r.ref.crop.end + "s" : "";
+              const fmt = (o, k) => o && o[k] != null ? o[k] : (o && o["attack"] != null && k === "attackMs" ? o.attack : "–");
+              const real = r.ref ? "real " + fmt(r.ref, "attackMs") + "/" + fmt(r.ref, "d20") + "/" + fmt(r.ref, "d40") + "ms" +
+                (r.ref.dbAt1s != null ? "  @" + [1, 2, 5].map((s) => r.ref["dbAt" + s + "s"]).join("/") + "dB" : "") : "no ref";
+              const synth = r.synth ? "synth " + fmt(r.synth, "attackMs") + "/" + fmt(r.synth, "d20") + "/" + fmt(r.synth, "d40") + "ms" +
+                (r.synth.dbAt1s != null ? "  @" + [1, 2, 5].map((s) => r.synth["dbAt" + s + "s"]).join("/") + "dB" : "") : "no synth";
+              return t + "  " + r.preset + "  " + (r.ref && r.ref.name ? r.ref.name : "") + "  " + crop + "  |  " + real + "  |  " + synth + (r.note ? "  — " + r.note : "");
+            }).join("\n")
+          : "(empty save file)";
+      } catch (err) {
+        saved.textContent = "could not read /debug/comparisons.json (" + err.message + ")";
+      }
+    }
+loadSaved();
+
+    // -----------------------------------------------------------------------
+    // Recorded body IR (progress 19): the crop window becomes the guitar body
+    // impulse. Imported to audio.ts (applied live to the shared graph), and
+    // stored so the whole app picks it up from localStorage.
+    // -----------------------------------------------------------------------
+    const irLevelInput = $("irLevel");
+    const irLevelLabel = $("irLevelLabel");
+    const irStatusEl = $("irStatus");
+    function refreshBodyIR() {
+      const st = getBodyIRStatus();
+      const cfg = configSnapshot();
+      const level = typeof cfg.ir === "object" && cfg.ir ? cfg.ir.level : 0.5;
+      irStatusEl.textContent = st.origin
+        ? "body IR active (" + st.origin + ", " + st.lengthMs + "ms @ " + st.sampleRate + "Hz) — every string rings the real box"
+        : "no body IR loaded (static EQ body)";
+      irLevelInput.value = String(Math.round(level * 100));
+      irLevelLabel.textContent = level.toFixed(2);
+    }
+    $("setIR").addEventListener("click", () => {
+      if (!reference) { irStatusEl.textContent = "record or load a clip first, then crop to the knock"; return; }
+      const data = windowedData();
+      if (data.length < 128) { irStatusEl.textContent = "crop window too small — adjust Start/End"; return; }
+      setBodyIRFromPcm(data, reference.sampleRate);
+      refreshBodyIR();
+    });
+    $("clearIR").addEventListener("click", () => {
+      clearBodyIR();
+      refreshBodyIR();
+    });
+
+    // One-click capture: record ~4s from the mic, auto-find the knock, crop
+    // around it, set it as the body IR, and strum so it's audible immediately.
+    async function captureBodyIR() {
+      if (recorder && recorder.state === "recording") { irStatusEl.textContent = "stop the running recording first"; return; }
+      prewarm(); // build+unlock the audio context inside this click gesture
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+        });
+      } catch (err) {
+        irStatusEl.textContent = "mic unavailable: " + err.message;
+        return;
+      }
+      const chunks = [];
+      const rec = new MediaRecorder(stream);
+      rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+      rec.onstop = async () => {
+        $("captureIR").textContent = "Capture body IR";
+        for (const t of stream.getTracks()) t.stop();
+        irStatusEl.textContent = "decoding…";
+        try {
+          const mono = await decodeToMono(await new Blob(chunks, { type: rec.mimeType || "audio/webm" }).arrayBuffer());
+          let peak = 0;
+          for (let i = 0; i < mono.data.length; i++) { const a = Math.abs(mono.data[i]); if (a > peak) peak = a; }
+          if (peak < 1e-4) { irStatusEl.textContent = "no signal captured — the knock was probably too quiet or off-mic"; return; }
+          const threshold = peak * 0.05;
+          let onset = 0;
+          for (let i = 3; i < mono.data.length; i++) if (Math.abs(mono.data[i]) > threshold) { onset = i; break; }
+          const cfg = configSnapshot();
+          const maxMs = cfg.ir && cfg.ir.maxMs ? cfg.ir.maxMs : 1200;
+          const leadIn = Math.floor(mono.sampleRate * 0.06);
+          const end = Math.min(mono.data.length, onset + Math.floor((mono.sampleRate * maxMs) / 1000));
+          const crop = mono.data.slice(Math.max(0, onset - leadIn), end);
+          setBodyIRFromPcm(crop, mono.sampleRate);
+          setReference(mono, "IR capture (" + ((crop.length / mono.sampleRate) * 1000).toFixed(0) + "ms)");
+          refreshBodyIR();
+          strum($("preset").value);
+        } catch (err) {
+          irStatusEl.textContent = "could not decode the capture (" + err.message + ")";
+        }
+      };
+      rec.start();
+      $("captureIR").textContent = "Knock now…";
+      irStatusEl.textContent = "knock on the top near the bridge (capturing ~4s)";
+      setTimeout(() => { if (rec.state === "recording") rec.stop(); }, 4000);
+    }
+    $("captureIR").addEventListener("click", captureBodyIR);
+    $("dlIR").addEventListener("click", () => {
+      const wav = getBodyIRWav();
+      if (!wav) { irStatusEl.textContent = "nothing set yet — capture a body IR first"; return; }
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(wav);
+      a.download = "body-ir.wav";
+      a.click();
+    });
+    irLevelInput.addEventListener("input", () => {
+      const level = parseFloat(irLevelInput.value) / 100;
+      irLevelLabel.textContent = level.toFixed(2);
+      setBodyIRLevel(level);
+    });
+    refreshBodyIR();
+
+    $("playRef").addEventListener("click", () => {
+      if (!refBuffer) { refStatus.textContent = "record or load a reference first"; return; }
+      if (playingSource && $("playRef").textContent === "Stop") { stopPlayback(); return; }
+      statusBeforePlay = refStatus.textContent;
+      playSource(refBuffer);
+      $("playRef").textContent = "Stop";
+      refStatus.textContent = "playing reference — compare by ear";
+    });
+    $("playSynth").addEventListener("click", () => {
+      if (!synthBuffer) { refStatus.textContent = "run Compare vs synth first"; return; }
+      if (playingSource && $("playSynth").textContent === "Stop") { stopPlayback(); return; }
+      statusBeforePlay = refStatus.textContent;
+      playSource(synthBuffer);
+      $("playSynth").textContent = "Stop";
+      refStatus.textContent = "playing synth render — compare by ear";
+    });
+
+    // -----------------------------------------------------------------------
+    // Sample playback (progress 20): record the six open strings once, then the
+    // app plays every guitar voicing from your real guitar (transposing the
+    // nearest recorded string). See audio.ts `setSample` / `scheduleSampleVoice`.
+    // -----------------------------------------------------------------------
+    const SAMPLE_MIDI = TUNING;
+    const SAMPLE_NAMES = ["E2", "A2", "D3", "G3", "B3", "E4"];
+    const SAMPLE_PRESETS = ["e2", "a2", "d3", "g3", "b3", "e4"];
+    const SAMPLE_PARTS = ["low E", "A", "D", "G", "B", "high E"];
+    const smpStatusEl = $("smpStatus");
+    const useSamples = $("useSamples");
+    let sampleRec = null;
+    let sampleStream = null;
+    let sampleTicker = null;
+
+    function refreshSamples() {
+      const st = getSamplesStatus();
+      const parts = st.samples
+        .map((s, i) => (s ? `${SAMPLE_NAMES[i]} ${(s.ms / 1000).toFixed(1)}s` : null))
+        .filter(Boolean);
+      useSamples.checked = st.enabled;
+      useSamples.disabled = parts.length === 0;
+      smpStatusEl.textContent = st.enabled && parts.length
+        ? `sample playback ON — recorded: ${parts.join(", ")}`
+        : parts.length
+          ? "samples recorded but OFF — tick Use samples"
+          : "no samples recorded — synth playback";
+    }
+
+    async function captureSample(stringIndex) {
+      if (sampleRec && sampleRec.state === "recording") { sampleRec.stop(); return; }
+      prewarm(); // build + unlock the audio context inside this click gesture
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+        });
+      } catch (err) {
+        smpStatusEl.textContent = "mic unavailable: " + err.message;
+        return;
+      }
+      sampleStream = stream;
+      const chunks = [];
+      const rec = new MediaRecorder(stream);
+      sampleRec = rec;
+      const btn = document.querySelector(`[data-sample="${stringIndex}"]`);
+      rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+      rec.onstop = async () => {
+        btn.textContent = SAMPLE_NAMES[stringIndex];
+        for (const t of stream.getTracks()) t.stop();
+        sampleStream = null;
+        sampleRec = null;
+        clearInterval(sampleTicker);
+        try {
+          const mono = await decodeToMono(await new Blob(chunks, { type: rec.mimeType || "audio/webm" }).arrayBuffer());
+          setSample(stringIndex, SAMPLE_MIDI[stringIndex], mono.data, mono.sampleRate);
+          setSamplesEnabled(true);
+          refreshSamples();
+          setReference(mono, "string " + SAMPLE_NAMES[stringIndex] + " capture (" + (mono.data.length / mono.sampleRate).toFixed(1) + "s)");
+          // Hear it immediately: strum that one string's preset with the bank live.
+          strum(SAMPLE_PRESETS[stringIndex]);
+        } catch (err) {
+          smpStatusEl.textContent = "could not decode the capture (" + err.message + ")";
+        }
+      };
+      rec.start();
+      btn.textContent = "Stop";
+      smpStatusEl.textContent = "pluck the " + SAMPLE_PARTS[stringIndex] + " string and let it ring… (press Stop when done)";
+      sampleTicker = setInterval(() => {
+        if (sampleRec && sampleRec.state === "recording") smpStatusEl.textContent = "recording… pluck the " + SAMPLE_PARTS[stringIndex] + " string";
+      }, 800);
+      setTimeout(() => { if (sampleRec && sampleRec.state === "recording") sampleRec.stop(); }, 30000);
+    }
+    document.querySelectorAll("[data-sample]").forEach((btn) => {
+      btn.addEventListener("click", () => captureSample(Number(btn.dataset.sample)));
+    });
+    useSamples.addEventListener("change", () => {
+      setSamplesEnabled(useSamples.checked);
+      refreshSamples();
+    });
+    $("clearSMP").addEventListener("click", () => {
+      clearSamples();
+      refreshSamples();
+    });
+    $("dlSMP").addEventListener("click", () => {
+      let count = 0;
+      for (let i = 0; i < 6; i++) {
+        const wav = getSampleWav(i);
+        if (!wav) continue;
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(wav);
+        a.download = `string-${i}.wav`;
+        a.click();
+        count++;
+      }
+      if (!count) smpStatusEl.textContent = "nothing recorded yet — capture at least one string";
+      else smpStatusEl.textContent = "downloaded " + count + " sample .wavs";
+    });
+    refreshSamples();
+
+    // Guitar engine (progress 21): pick which engine plays guitar voicings.
+    // The radio reflects `getSmplrStatus().mode` (which reads the config); choosing
+    // "smplr kit" starts the ~2.6 MB kit decode if it isn't already loaded.
+    const engInputs = [...document.querySelectorAll('input[name="engine"]')];
+    const engStatusEl = $("engStatus");
+    function refreshEngine() {
+      const st = getSmplrStatus();
+      engInputs.forEach((el) => (el.checked = el.value === st.mode));
+      const p = st.progress;
+      engStatusEl.textContent =
+        st.mode === "smplr"
+          ? st.ready
+            ? "smplr kit loaded & ready — 6 per-string instruments on their own gates + seats"
+            : (p.total ? `smplr kit loading… ${p.loaded}/${p.total} samples` : "smplr kit loading (first play primes it)…")
+          : st.mode === "samples"
+            ? "recorded-sample engine (K–S synth fills the gaps) — smplr kit " + (st.ready ? "loaded" : "not loaded")
+            : "Karplus–Strong synth engine — smplr kit " + (st.ready ? "loaded" : "not loaded");
+    }
+    engInputs.forEach((el) =>
+      el.addEventListener("change", () => {
+        setEngineMode(el.value);
+        refreshEngine();
+        // Poll while a kit load is in flight so the progress line moves.
+        if (el.value === "smplr") {
+          const poll = setInterval(() => {
+            refreshEngine();
+            if (getSmplrStatus().ready) clearInterval(poll);
+          }, 250);
+        }
+      }),
+    );
+    refreshEngine();
   </script>
 </body>
 </html>

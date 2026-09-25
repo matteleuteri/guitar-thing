@@ -31,6 +31,18 @@
  *     separate from the very first sample.
  *  5. An attack scoop glides the delay length (pitch) sharply toward target,
  *     giving the low strings a subtle plucked bend.
+ *  6. "String life": a slow amplitude + micro-pitch wobble, each note starting
+ *     at its own random phase and rate, makes the sustained tone breathe
+ *     instead of holding a machine-steady loop. The wobble is strongest right
+ *     after the pluck (a "bloom") and settles into a steady lope. A brief
+ *     low-frequency "body thump" (the top reacting to the pluck) rides on the
+ *     output only — never fed back into the loop, so it can't ring as a pitch.
+ *  7. Attack bloom: a real pluck excites a burst of bright transient energy
+ *     that dies over the first second while the fundamental settles. The loop
+ *     starts at a brighter damping coefficient (`bloomStartDamp`) and glides
+ *     up to the string's sustained `damping`, and a `bloomLevel` amount of
+ *     extra early level settles away. Both share one `e^(-t/τ)` envelope, so a
+ *     strummed chord "blooms and settles" like strings being hit.
  *
  * The processor stops itself after `ringFrames` frames so the host can free it.
  */
@@ -80,7 +92,30 @@ export class PluckStringProcessor extends AudioWorkletProcessor {
 
   private scoopsLeft = 0;
 
+  /** Sample clock since the note started (drives the life wobble + thump). */
+  private elapsed = 0;
+  /** Slow amplitude/pitch wobble ("string life"), per-note phase so voices
+   *  of a chord don't bob in unison. */
+  private readonly lifeHz: number;
+  private readonly lifePhase: number;
+  private readonly lifeAmt: number;
+  private readonly lifePitchCents: number;
+  private readonly lifeBloomSamples: number;
+  /** Brief body "box hit" at the attack; output-only, decays out fast. */
+  private readonly thumpLevel: number;
+  private readonly thumpHz: number;
+  private readonly thumpDecaySamples: number;
+  private readonly thumpPhase: number;
+
   private readonly ringFrames: number;
+
+  /** Attack bloom: the loop starts at this (brighter) damping coefficient and
+   *  glides up to `damping` over `bloomSamples`. 0/no bloom keeps the note on
+   *  its fixed damping the whole time. */
+  private readonly bloomStartDamp: number;
+  private readonly bloomSamples: number;
+  /** Extra early level that settles away (0..~0.35). 0 disables the bloom. */
+  private readonly bloomLevel: number;
 
   constructor(options?: AudioWorkletNodeOptions) {
     super();
@@ -103,6 +138,10 @@ export class PluckStringProcessor extends AudioWorkletProcessor {
     this.sustain = clamp01(params.sustain ?? 0.996);
     this.damping = clamp01(params.damping ?? 0.5);
     this.decay = clamp01(params.decay ?? 0.25);
+    // Attack bloom (gated on `bloomLevel`): start bright / settle to `damping`.
+    this.bloomStartDamp = clamp01(params.bloomStartDamp ?? 0.07);
+    this.bloomSamples = Math.max(1, Math.round((sampleRate * (params.bloomMs ?? 420)) / 1000));
+    this.bloomLevel = clamp01(params.bloomLevel ?? 0);
     const brightness = clamp01(params.brightness ?? 0.85);
     // Where along the string the pick strikes (small = near bridge/bright,
     // large = near nut/fat). This is what makes a voice timbrally distinct by
@@ -117,6 +156,21 @@ export class PluckStringProcessor extends AudioWorkletProcessor {
     const pickBright = clamp01(params.pickBright ?? 0.6);
     const cutoffHz = 350 + (9000 - 350) * Math.pow(pickBright, 1.6);
     this.scrapeCutoff = clamp01(1 - Math.exp((-2 * Math.PI * cutoffHz) / sampleRate));
+
+    // String life: a slow wobble with a per-note random phase/hz (the host
+    // passes a phase and a hz slot drawn from config.life's spread). Low notes
+    // keep their own lope; nobody bobs in unison with a chord voice.
+    this.lifeHz = Math.max(0.05, params.lifeHz ?? 1.5);
+    this.lifePhase = params.lifePhase ?? Math.random() * Math.PI * 2;
+    this.lifeAmt = clamp01(params.lifeAmt ?? 0);
+    this.lifePitchCents = Math.max(0, params.lifePitchCents ?? 0);
+    this.lifeBloomSamples = Math.max(1, Math.round((sampleRate * (params.lifeBloomMs ?? 600)) / 1000));
+
+    // Body thump: brief low-frequency "box hit" on the output only.
+    this.thumpLevel = clamp01(params.thumpLevel ?? 0);
+    this.thumpHz = Math.max(40, params.thumpHz ?? 106);
+    this.thumpDecaySamples = Math.max(1, Math.round((sampleRate * (params.thumpDecayMs ?? 90)) / 1000));
+    this.thumpPhase = Math.random() * Math.PI * 2;
 
     this.port.onmessage = (e) => {
       if (e.data && e.data.type === "stop") this.running = false;
@@ -160,20 +214,44 @@ export class PluckStringProcessor extends AudioWorkletProcessor {
       this.delay += (this.delayTarget - this.delay) / Math.max(1, this.scoopsLeft);
     }
 
-    // 2. Read the delay line at the integer part of the period. The fractional
-    //    part becomes a first-order allpass: pitch-exact at DC, and (because
-    //    the allpass delays less at high frequencies) the higher partials sit
-    //    microscopically sharp, like a real stiff string.
-    const integerDelay = Math.max(1, Math.floor(this.delay));
+    // 6. String life: a slow amplitude+pitch wobble (per-note phase), strongest
+    //    right after the pluck ("bloom"), settling to a steady lope. Keeps the
+    //    sustained tone from reading as a machine-stamped loop.
+    const lifeTime = this.elapsed / sampleRate;
+    this.elapsed++;
+    const life = Math.sin(2 * Math.PI * this.lifeHz * lifeTime + this.lifePhase);
+    const bloom = Math.exp(-lifeTime / (this.lifeBloomSamples / sampleRate));
+    const bloomFactor = bloom + 0.5;
+    const wobble = 1 + life * this.lifeAmt * bloomFactor;
+    const pitchWobble = 1 + life * (this.lifePitchCents / 1200) * bloomFactor;
+
+    // 2. Read the delay line at the integer part of the (life-wobbled) period.
+    //    The fractional part becomes a first-order allpass: pitch-exact at DC,
+    //    and (because the allpass delays less at high frequencies) the higher
+    //    partials sit microscopically sharp, like a real stiff string.
+    const liveDelay = this.delay * pitchWobble;
+    const integerDelay = Math.max(1, Math.floor(liveDelay));
     const delayed = this.readDelayed(this.write - integerDelay);
-    const fractional = this.allpass(delayed, this.delay - integerDelay);
+    const fractional = this.allpass(delayed, liveDelay - integerDelay);
+
+    // 7. Attack bloom: one shared `e^(-t/τ)` envelope settles both the loop
+    //    brightness (start `bloomStartDamp`, glide up to sustained `damping`)
+    //    and a touch of extra early level. With `bloomLevel` 0 the note stays
+    //    on its fixed damping / level — plain fallback notes and piano keys
+    //    are untouched.
+    const bloomSettle = Math.exp(-this.elapsed / this.bloomSamples);
+    const dampingNow = this.bloomLevel > 0
+      ? this.bloomStartDamp + (this.damping - this.bloomStartDamp) * (1 - bloomSettle)
+      : this.damping;
+    const bloomGain = 1 + this.bloomLevel * bloomSettle;
 
     // 3. Two-stage loop damping: `damping` sets the sustained brightness, then
     //    `decay` steepens the loss so high partials burn off earlier — wound
-    //    strings can darken fast while plain strings keep a sparkly tail.
-    this.sustainLowpass = this.damping * this.sustainLowpass + (1 - this.damping) * fractional;
+    //    strings can darken fast while plain strings keep a sparkly tail. The
+    //    `wobble` rides the loop gain so the note swallows and recovers.
+    this.sustainLowpass = dampingNow * this.sustainLowpass + (1 - dampingNow) * fractional;
     this.decayLowpass = this.decay * this.decayLowpass + (1 - this.decay) * this.sustainLowpass;
-    let loopOutput = this.decayLowpass * this.sustain;
+    let loopOutput = this.decayLowpass * this.sustain * wobble;
 
     // 4. Pick scrape: a short, per-string-shaped noise transient at the onset
     //    only. (The pitched part of the pluck is the seeded triangle, so the
@@ -194,7 +272,20 @@ export class PluckStringProcessor extends AudioWorkletProcessor {
 
     this.buffer[this.write % this.size] = loopOutput;
     this.write++;
-    this.last = fractional;
+
+    // 6. Body thump: the top/bridge reacting to the pluck. Kept off the string
+    //    loop (added here, to the output) so it decays out fast and can't ring
+    //    back as a pitch through the 1/freq delay.
+    let body = 0;
+    if (this.thumpLevel > 0) {
+      const thumpTime = this.elapsed / sampleRate;
+      const decaySeconds = this.thumpDecaySamples / sampleRate;
+      body =
+        Math.sin(2 * Math.PI * this.thumpHz * thumpTime + this.thumpPhase) *
+        this.thumpLevel *
+        Math.exp(-thumpTime / decaySeconds);
+    }
+    this.last = (fractional + body) * bloomGain;
   }
 
   /**
