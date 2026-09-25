@@ -3,6 +3,12 @@
 Instructions for working in this repo. Read this before editing so you keep behavior
 consistent with what the user already approved.
 
+## No pushes without explicit consent
+
+Do **not** run `git push` (or `git commit` without being asked either) — only if
+the user explicitly says to. Commit and push exactly when instructed, and tell
+them before doing it if they haven't just said so.
+
 ## What this project is
 
 A dependency-free browser app ("Note/Chord Finder") with two instrument modes:
@@ -43,8 +49,11 @@ explicit choice the app now plays guitar voicings from a real, consistent GM
 steel-guitar kit via **smplr** (purpose-built Web Audio sampler, `smplr@1.0.0`,
 the app's first runtime dependency). The kit (`assets/guitar-steel-ogg.js`,
 MusyngKite `acoustic_guitar_steel`, ~2.6 MB, MIDI.js `MIDI.Soundfont` format) is
-self-hosted and shipped by the existing Pages `assets/` workflow; so is the
-vendored smplr build (`assets/smplr.mjs`, `/dist/index.mjs` copied as-is and
+self-hosted and shipped by the existing Pages `assets/` workflow; a second
+classical-nylon kit (`assets/guitar-nylon-ogg.js`, progress 22) ships the same
+way, selectable via the "Guitar sample" button in the app and a radio in the
+harness. The vendored smplr build (`assets/smplr.mjs`, `/dist/index.mjs` copied
+as-is and
 imported **module-relative** — the app ships unbundled ESM, so a bare `"smplr"`
 specifier would 404 and `node_modules/` isn't deployed; the relative import
 works from the root app, the `/debug` harness and the `/guitar-thing/` Pages
@@ -833,7 +842,28 @@ box." The playback side is now a `ConvolverNode` fed by a real recorded IR:
     start` now plays the kit too (previously the approved local sound was the
     recorded-sample bank). To A/B, use the "Guitar engine" row in
     `/debug/audio-debug.html` (smplr vs samples vs synth on chord + single
-    strings). The kit URL + gain/attack/velocity knobs live in `config.engine`.
+    strings).
+22. **Classical-nylon kit — a second real guitar (kit switch). Landed.**
+    Added a second self-hosted kit (`assets/guitar-nylon-ogg.js`, MusyngKite
+    `acoustic_guitar_nylon`, ~2.1 MB, same `MIDI.Soundfont` format) and a
+    steel ↔ nylon switch. `config.engine` grew `kit: "steel" | "nylon"` +
+    `kits: Record<...>` (replacing the single `kitUrl`; the engine resolves
+    `kits[kit]`), and `audio.ts` exports `getGuitarKit()`/`setGuitarKit(name)`.
+    Switching rebuilds the live engine: the existing engine is `dispose()`d
+    (now also disconnects its six gates so the dead kit stops feeding the
+    master bus), the kit is nulled and re-primed. The decode cache is now keyed
+    per (context, kit URL) — each kit decodes at most once per context, so
+    steel→nylon→steel re-decodes only nylon. The choice persists to
+    localStorage (`guitar-thing.guitar-kit`) and is restored synchronously in
+    `ensure()` BEFORE the page-load prime, so the next session pre-loads the
+    last kit. UI: a "Guitar sample" toggle button in the main page's guitar
+    block (shows the ACTIVE kit, click to flip); the debug harness got a
+    steel/nylon radio row and its status line names the kit. The steel kit
+    stays the default. `scripts/audio-sched.mjs` regression-parses BOTH kits
+    (88 notes + OggS each) and asserts the switch decodes the new kit once and
+    reuses the cache when flipping back. **Do:** A/B steel vs nylon on chord +
+    single strings in the harness and the main page.
+    The kit gain/attack/velocity knobs live in `config.engine`.
 - **Attack/transient redesign.** Slices 1–2 landed — see progress 14 and 18:
   each string's scrape carries its own brightness (`pickBright`) and length
   (`pickDecayMs`), and the onset now "blooms" (bright + touch louder) then

@@ -309,9 +309,21 @@ check(sevs.some((e) => e.role === "root") && sevs.some((e) => e.role === "color"
 // (88 notes, not 88×6) and hands the buffer map to six `Instrument` factories,
 // so the fake must cover `decodeKit` + `Instrument` + `soundfontToPreset`.
 const kitStarts = [];
+const kitDecodes = [];
+// Mirrors `decodeKitOnce`: each kit is fetched + decoded at most once per
+// context (the launcher records the filename only on the first call).
+const kitDecodeCache = new Map();
 globalThis.__SMPLR_FAKE__ = {
   SampleLoader: () => ({}),
-  decodeKit: () => Promise.resolve({ buffers: new Map(), noteNames: [] }),
+  decodeKit: (url) => {
+    let p = kitDecodeCache.get(url);
+    if (!p) {
+      kitDecodes.push(url.replace(/^.*\//, ""));
+      p = Promise.resolve({ buffers: new Map(), noteNames: [] });
+      kitDecodeCache.set(url, p);
+    }
+    return p;
+  },
   soundfontToPreset: () => ({}),
   Instrument: (plugin) => (ctx, opts) => {
     const inst = {
@@ -338,6 +350,12 @@ const kitNotes = parseSoundfontJs(kitText);
 const kitKeys = Object.keys(kitNotes);
 check(kitKeys.length === 88, `kit parses to 88 notes (got ${kitKeys.length})`);
 check(kitNotes.A0 && kitNotes.A0.startsWith("T2dn"), "a kit note value is raw base64 OGG (OggS magic), prefix stripped");
+// Both self-hosted kits must parse — steel (default) and classical nylon.
+const nylonText = readFileSync(new URL("../assets/guitar-nylon-ogg.js", import.meta.url), "utf8");
+const nylonNotes = parseSoundfontJs(nylonText);
+const nylonKeys = Object.keys(nylonNotes);
+check(nylonKeys.length === 88, `classical nylon kit parses to 88 notes (got ${nylonKeys.length})`);
+check(nylonNotes.A0 && nylonNotes.A0.startsWith("T2dn"), "nylon kit notes are raw base64 OGG too");
 // Capture BEFORE `setEngineMode` so the six per-string gates the engine builds
 // while priming are inside the window we inspect below.
 const gainsBeforeKit = gains.length;
@@ -394,6 +412,37 @@ check(kgatedFromZero === kgates.length, `every kit gate is silent from t=0 (${kg
 const kstarts = kevs.map((e) => e.time).sort((a, b) => a - b);
 const kspan = kstarts[kstarts.length - 1] - kstarts[0];
 check(kspan > 0.4, `kit voices are strummed over time (span ${(kspan * 1000).toFixed(0)}ms > 400ms)`);
+
+// Kit switch (progress 22): steel-string → classical nylon rebuilds the engine
+// and decodes the OTHER kit (the default is steel, so the first decode above
+// should have been the steel file).
+const decodeTail = (url) => url.split("/").pop();
+check(
+  kitDecodes.some((f) => f.endsWith("guitar-steel-ogg.js")),
+  `default engine decodes the steel kit (got ${kitDecodes.map(decodeTail).join(", ")})`,
+);
+kitStarts.length = 0;
+const { setGuitarKit, getGuitarKit } = audio;
+check(getGuitarKit() === "steel", `default kit is steel (got ${getGuitarKit()})`);
+setGuitarKit("nylon");
+await new Promise((r) => setTimeout(r, 20));
+check(getGuitarKit() === "nylon", "setGuitarKit('nylon') sticks");
+check(
+  kitDecodes.some((f) => f.endsWith("guitar-nylon-ogg.js")),
+  `the switch decoded the nylon kit (got ${kitDecodes.map(decodeTail).join(", ")})`,
+);
+playVoicing([0, 3, 2, 0, 1, 0], TUNING);
+await new Promise((r) => setTimeout(r, 40));
+check(kitStarts.length === 6, `the rebuilt engine plays 6 notes (got ${kitStarts.length})`);
+setGuitarKit("nylon");
+setGuitarKit("steel");
+await new Promise((r) => setTimeout(r, 20));
+const decodesBefore = kitDecodes.length;
+setGuitarKit("nylon");
+await new Promise((r) => setTimeout(r, 20));
+// Each kit is decoded once per context: switching back to nylon reuses the
+// cache and must NOT decode the file again.
+check(kitDecodes.length === decodesBefore, `switching back reuses the cached decode (${decodesBefore})`);
 
 if (failures.length) {
   console.error(`\nAUDIO FAILURES (${failures.length})`);

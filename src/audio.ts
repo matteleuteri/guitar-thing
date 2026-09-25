@@ -94,9 +94,12 @@ function ensure(): Promise<void> {
     applyBodyIR(context, graph);
     // Fire-and-forget: pick up a stored body IR and any recorded string
     // samples so they're ready for the first play without blocking the
-    // click that built the audio path.
+    // click that built the audio path. The chosen kit (steel / nylon) is
+    // synchronous — it must land BEFORE `primeGuitarEngine` so the right
+    // kit is the one decoded.
     void loadStoredBodyIR();
     void loadStoredSamples();
+    loadStoredGuitarKit();
     primeGuitarEngine();
   } else if (context.state === "suspended") {
     context.resume().catch(() => undefined);
@@ -175,6 +178,56 @@ export function preloadGuitarEngine(): void {
 export function setEngineMode(mode: PluckAudioConfig["engine"]["mode"]): void {
   DEFAULT_CONFIG.engine.mode = mode;
   if (mode === "smplr") primeGuitarEngine();
+}
+
+/** The self-hosted smplr kits the app ships. */
+export type GuitarKitName = "steel" | "nylon";
+
+const KIT_STORAGE_KEY = "guitar-thing.guitar-kit";
+
+function persistGuitarKit(): void {
+  try {
+    localStorage.setItem(KIT_STORAGE_KEY, DEFAULT_CONFIG.engine.kit);
+  } catch {
+    // ignore (private-mode writes are best-effort)
+  }
+}
+
+/** Restore the persisted kit before the engine is ever primed (called from
+ *  `ensure`, so the main page's page-load preload and the harness both honor
+ *  the last choice). */
+function loadStoredGuitarKit(): void {
+  try {
+    const stored = localStorage.getItem(KIT_STORAGE_KEY);
+    if (stored === "steel" || stored === "nylon") DEFAULT_CONFIG.engine.kit = stored;
+  } catch {
+    // ignore
+  }
+}
+
+/** Which kit the smplr engine plays right now (`config.engine.kit`). */
+export function getGuitarKit(): GuitarKitName {
+  return DEFAULT_CONFIG.engine.kit;
+}
+
+/**
+ * Switch the sampled guitar live — steel-string acoustic ↔ classical nylon
+ * (progress 22). If a kit engine is already loaded it is torn down and rebuilt
+ * decading the NEW kit; each kit keeps its own decode cache, so switching back
+ * a second time is free. The choice persists so the next page load pre-loads
+ * the same kit. In non-smplr modes this just records the preference — the next
+ * `primeGuitarEngine` uses it.
+ */
+export function setGuitarKit(kit: GuitarKitName): void {
+  if (DEFAULT_CONFIG.engine.kit === kit) return;
+  DEFAULT_CONFIG.engine.kit = kit;
+  persistGuitarKit();
+  if (guitarEngine) {
+    guitarEngine.dispose();
+    guitarEngine = null;
+    guitarEngineReady = false;
+  }
+  primeGuitarEngine();
 }
 
 /** Set (or clear) the recorded-body IR convolver on an existing graph: null →
@@ -1059,6 +1112,8 @@ export function stopAudio(): void {
  */
 export function getSmplrStatus(): {
   mode: PluckAudioConfig["engine"]["mode"];
+  /** Which kit the smplr engine plays when ready ("steel" | "nylon"). */
+  kit: GuitarKitName;
   ready: boolean;
   /** Engine built and its kit decode still running (the app holds the first
    *  play for it). False when there's no engine yet or it's ready. */
@@ -1067,6 +1122,7 @@ export function getSmplrStatus(): {
 } {
   return {
     mode: DEFAULT_CONFIG.engine.mode,
+    kit: DEFAULT_CONFIG.engine.kit,
     ready: guitarEngineReady,
     loading: guitarEngine !== null && !guitarEngineReady,
     progress: guitarEngine ? { ...guitarEngine.progress } : { loaded: 0, total: 0 },

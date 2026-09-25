@@ -1,4 +1,4 @@
-import { stopAudio, playNotes, playVoicing, preloadGuitarEngine, getSmplrStatus, getAudioDebugEvents } from "./audio.js";
+import { stopAudio, playNotes, playVoicing, preloadGuitarEngine, getSmplrStatus, getAudioDebugEvents, getGuitarKit, setGuitarKit, type GuitarKitName } from "./audio.js";
 import { DEFAULT_CONFIG } from "./synth/config.js";
 import { findFingerings, type Fingering } from "./fretboard.js";
 import { findPianoVoicings, type PianoVoicing } from "./piano.js";
@@ -55,6 +55,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const tuningSelect = document.getElementById("tuning") as HTMLSelectElement;
   const fretsInput = document.getElementById("frets") as HTMLInputElement;
   const strumInput = document.getElementById("strum") as HTMLInputElement;
+  const kitButton = document.getElementById("kit") as HTMLButtonElement;
   const pianoLowInput = document.getElementById("piano-low") as HTMLInputElement;
   const pianoHighInput = document.getElementById("piano-high") as HTMLInputElement;
   const keySizeInput = document.getElementById("key-size") as HTMLInputElement;
@@ -146,6 +147,27 @@ document.addEventListener("DOMContentLoaded", () => {
   };
   strumInput.addEventListener("input", applyStrum);
   strumInput.addEventListener("change", applyStrum);
+
+  // Sampled-guitar kit toggle (progress 22): steel-string acoustic ↔ classical
+  // nylon. The button shows the ACTIVE kit; clicking rebuilds the smplr engine
+  // with the other one. The label is set after `preloadGuitarEngine` above so a
+  // persisted choice from a previous session is reflected.
+  const KIT_NAMES: Record<GuitarKitName, string> = {
+    steel: "Steel-string acoustic",
+    nylon: "Classical nylon",
+  };
+  let guitarKit = getGuitarKit();
+  const refreshKitButton = () => {
+    const other: GuitarKitName = guitarKit === "steel" ? "nylon" : "steel";
+    kitButton.textContent = KIT_NAMES[guitarKit];
+    kitButton.title = `Sampled guitar kit: ${KIT_NAMES[guitarKit].toLowerCase()}. Click to switch to ${KIT_NAMES[other].toLowerCase()}.`;
+  };
+  kitButton.addEventListener("click", () => {
+    guitarKit = guitarKit === "steel" ? "nylon" : "steel";
+    setGuitarKit(guitarKit);
+    refreshKitButton();
+  });
+  refreshKitButton();
 
   const getTuning = (): number[] => {
     const tuning = TUNINGS.find((x) => x.id === tuningSelect.value)!;

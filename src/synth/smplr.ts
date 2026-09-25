@@ -1,25 +1,27 @@
 /**
- * smplr guitar engine (progress 21) — the sampled-guitar front door. One GM
- * steel-guitar kit (self-hosted `assets/guitar-steel-ogg.js`, the MusyngKite
- * `acoustic_guitar_steel`) is fetched + decoded ONCE — all 88 notes pass
- * through `decodeAudioData` a single time — and then six per-string
+ * smplr guitar engine (progress 21) — the sampled-guitar front door. A real
+ * GM guitar kit (self-hosted under `assets/` — steel-string acoustic by
+ * default, classical nylon selectable) is fetched + decoded ONCE — all 88
+ * notes pass through `decodeAudioData` a single time — and then six per-string
  * `Instrument` instances share the resulting buffer map, each writing into its
  * own `[gate → stereo panner]` chain onto the app's master bus. (smplr's own
  * `Soundfont` would fetch+decode the kit PER INSTANCE, i.e. six times — the
  * redundant 528 decodes are what made a fresh page's first play land in the
- * fallback on slower devices; the kit's ~2.6 MB text is also downloaded once,
+ * fallback on slower devices; the kit's ~2 MB text is also downloaded once,
  * through the once-caching storage wrapper.) The gate is ours (holds silence
  * from t=0, ramps at the note's strum slot), so the "one sound" guard that
  * protects the K–S and sample paths holds here too, and the per-string
  * instances give each string a fixed stereo seat (bass left → treble right)
- * the same way the synthesized voices do.
+ * the same way the synthesized voices do. Each kit is decoded at most once
+ * per context (cached by kit URL), so switching steel ↔ nylon re-decodates
+ * only the newly-chosen kit.
  *
  * Testability: `scripts/audio-sched.mjs` stubs Web Audio but not smplr, so the
  * audio graph assertions are run against OUR gate/panner nodes while a fake
  * smplr (via `globalThis.__SMPLR_FAKE__`) records the `start()` calls — notes,
  * per-string order, roles and times — as the ground truth. The fake also
  * supplies a stub `decodeKit`, so the Node test never fetches or decodes the
- * real 2.6 MB kit.
+ * real ~2 MB kits.
  */
 
 import type { PluckAudioConfig } from "./config.js";
@@ -42,8 +44,8 @@ function lib(): typeof realSmplr {
 /**
  * Site assets live beside `dist/` (repo root → `/assets/...` locally, under
  * `/guitar-thing/assets/...` on Pages). Resolving against the module's URL —
- * not the page — means `config.engine.kitUrl` works from the root app AND the
- * debug harness (which runs from `/debug/`), and survives the Pages subdir.
+ * not the page — means `config.engine.kits[kit]` works from the root app AND
+ * the debug harness (which runs from `/debug/`), and survives the Pages subdir.
  */
 const ASSET_BASE = new URL("../../", import.meta.url);
 
@@ -118,10 +120,11 @@ export interface KitDecode {
   noteNames: string[];
 }
 
-/** Decoding is context-bound (an AudioBuffer belongs to its AudioContext), so
- *  cache the completed decode per context — a mode toggle rebuilds the engine
- *  on the same context without re-decoding the kit. */
-const decodeCache = new WeakMap<BaseAudioContext, Promise<KitDecode>>();
+/** Decoding is context-bound (an AudioBuffer belongs to its AudioContext) and
+ *  kit-bound (each context may hold both the steel and the nylon kit for cheap
+ *  toggling), so cache the completed decode per (context, kit URL) — a mode or
+ *  kit toggle rebuilds the engine on the same context without re-decoding. */
+const decodeCache = new WeakMap<BaseAudioContext, Map<string, Promise<KitDecode>>>();
 
 /**
  * Fetch + decode the whole kit ONCE for a context. `onProgress` ticks per note
@@ -132,7 +135,12 @@ function decodeKitOnce(
   url: string,
   onProgress?: (loaded: number, total: number) => void,
 ): Promise<KitDecode> {
-  const cached = decodeCache.get(context);
+  let byUrl = decodeCache.get(context);
+  if (!byUrl) {
+    byUrl = new Map();
+    decodeCache.set(context, byUrl);
+  }
+  const cached = byUrl.get(url);
   if (cached) return cached;
   const decoding = (async (): Promise<KitDecode> => {
     const res = await fetch(url);
@@ -160,9 +168,9 @@ function decodeKitOnce(
   // A rejected decode must not poison the cache: the engine's bounded retry
   // would otherwise keep reusing a dead promise instead of fetching again.
   void decoding.catch(() => {
-    if (decodeCache.get(context) === decoding) decodeCache.delete(context);
+    if (byUrl.get(url) === decoding) byUrl.delete(url);
   });
-  decodeCache.set(context, decoding);
+  byUrl.set(url, decoding);
   return decoding;
 }
 
@@ -222,7 +230,7 @@ export class SmplrGuitarEngine {
       decodeKit?: (url: string) => Promise<KitDecode>;
     };
     const { Instrument, HttpStorage, soundfontToPreset } = smplrModule;
-    const kit = new URL(config.engine.kitUrl, ASSET_BASE).href;
+    const kit = new URL(config.engine.kits[config.engine.kit], ASSET_BASE).href;
     // Whatever smplr does in parallel, the ~2.6 MB kit text is downloaded once.
     const storage = HttpStorage ? onceFetchStore(HttpStorage) : undefined;
 
@@ -323,9 +331,12 @@ export class SmplrGuitarEngine {
     for (const inst of this.instruments) inst.stop();
   }
 
-  /** Tear down the chains (used when an offline render replaces the engine). */
+  /** Tear down the chains (used when an offline render replaces the engine,
+   *  and when a kit switch rebuilds the live engine — the dead gates must not
+   *  keep a stale copy of the old kit wired into the master bus). */
   dispose(): void {
     this.stopAll();
+    for (const gate of this.gates) gate.disconnect();
   }
 }
 

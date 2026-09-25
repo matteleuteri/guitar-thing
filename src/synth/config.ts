@@ -232,8 +232,15 @@ export interface PluckAudioConfig {
   engine: {
     /** Active source for guitar voicings. */
     mode: "smplr" | "synth" | "samples";
-    /** The committed kit (page-relative — ships under `assets/`). */
-    kitUrl: string;
+    /**
+     * Which real guitar the smplr kit plays: steel-string acoustic
+     * (MusyngKite `acoustic_guitar_steel`, sparkly/nasal) or classical nylon
+     * (`guitar_nylon`, mellow/warm). Selecting a kit is a live engine swap —
+     * the other kit's decode stays cached per context, so going back is cheap.
+     */
+    kit: "steel" | "nylon";
+    /** The self-hosted kits (page-relative — they ship under `assets/`). */
+    kits: Record<"steel" | "nylon", string>;
     /** Level trim for the kit vs the synth path (1 = nominal). */
     gain: number;
     /** Host-side gate ramp ms (de-clicks the fade-in; the kit has its own attack). */
@@ -576,10 +583,15 @@ export const DEFAULT_CONFIG: PluckAudioConfig = {
   },
   // Which engine plays guitar voicings (progress 21): the smplr sampled kit
   // by default (real recordings, per-string instances, done once), with the
-  // recorded-string bank and the K–S synth selectable for A/B.
+  // recorded-string bank and the K–S synth selectable for A/B. `kit` picks
+  // which real guitar the kit plays; both kits ship under `assets/`.
   engine: {
     mode: "smplr",
-    kitUrl: "assets/guitar-steel-ogg.js",
+    kit: "steel",
+    kits: {
+      steel: "assets/guitar-steel-ogg.js",
+      nylon: "assets/guitar-nylon-ogg.js",
+    },
     gain: 1,
     attackMs: 6,
     velocity: 100,
