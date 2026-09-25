@@ -327,6 +327,17 @@ globalThis.__SMPLR_FAKE__ = {
     return inst;
   },
 };
+// The shipped kit must parse — regression guard for `parseSoundfontJs`: an
+// earlier version sliced from the file's FIRST `{`, which lands inside the
+// preamble's `var MIDI = {};` and throws, silently making EVERY page fall back
+// to the synth (the kit never played anywhere).
+const { parseSoundfontJs } = await import(new URL("../dist/synth/smplr.js", import.meta.url).href);
+const { readFileSync } = await import("node:fs");
+const kitText = readFileSync(new URL("../assets/guitar-steel-ogg.js", import.meta.url), "utf8");
+const kitNotes = parseSoundfontJs(kitText);
+const kitKeys = Object.keys(kitNotes);
+check(kitKeys.length === 88, `kit parses to 88 notes (got ${kitKeys.length})`);
+check(kitNotes.A0 && kitNotes.A0.startsWith("T2dn"), "a kit note value is raw base64 OGG (OggS magic), prefix stripped");
 // Capture BEFORE `setEngineMode` so the six per-string gates the engine builds
 // while priming are inside the window we inspect below.
 const gainsBeforeKit = gains.length;

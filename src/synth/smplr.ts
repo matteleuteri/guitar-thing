@@ -80,17 +80,22 @@ function onceFetchStore(inner: KitStorageFetch): KitStorageFetch {
 
 /**
  * The kit file is a plain `MIDI.Soundfont.<name> = { "<note>": "data:audio/...
- * ;base64,<data>", ... };` literal. Everything between the first `{` and the
- * final `}` is JSON; each value's `data:...base64,` mime prefix is stripped
- * before `atob`.
+ * ;base64,<data>", ... };` literal. Anchor on the `MIDI.Soundfont.` marker like
+ * smplr's own `midiJsToJson` does (naively slicing from the file's FIRST `{`
+ * breaks — the preamble `var MIDI = {};` starts with one), then the text from
+ * the assignment's `{` to the table's final `}` IS JSON. Each value's
+ * `data:...base64,` mime prefix is stripped before `atob`.
  */
-function parseSoundfontJs(text: string): Record<string, string> {
-  const start = text.indexOf("{");
+export function parseSoundfontJs(text: string): Record<string, string> {
+  const header = text.indexOf("MIDI.Soundfont.");
+  if (header < 0) throw new Error("soundfont: not a MIDI.js Soundfont file");
+  const start = text.indexOf("=", header) + 2;
   const end = text.lastIndexOf("}");
-  if (start < 0 || end <= start) {
-    throw new Error("soundfont: could not find the kit's note table");
-  }
-  const data = JSON.parse(text.slice(start, end + 1)) as Record<string, string>;
+  if (end <= start) throw new Error("soundfont: could not find the kit's note table");
+  // The MusyngKite files end `"E7": "…==",` with a TRAILING COMMA before the
+  // closing brace (illegal in strict JSON) — drop it before parsing.
+  const raw = text.slice(start, end + 1).replace(/,\s*\}$/, "}");
+  const data = JSON.parse(raw) as Record<string, string>;
   const out: Record<string, string> = {};
   for (const noteName of Object.keys(data)) {
     const value = data[noteName];
