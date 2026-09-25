@@ -23,7 +23,10 @@
 <body>
   <h1>Audio debug harness</h1>
   <p class="hint">Envelope + attack timeline + FFT of the master bus, tapped before the compressor.
-    Press "Strum" (or let it auto-strum on load) and watch the bars.</p>
+    Press "Strum" (or let it auto-strum on load) and watch the bars. The line below is the
+    ground truth for <i>what actually played</i> — engine, kit, per-note verbs — so a silent
+    fallback to the synth is visible at a glance.</p>
+  <p id="lastPlayed">nothing played yet</p>
 
   <div class="row">
     <canvas id="env" width="640" height="140"></canvas>
@@ -46,6 +49,7 @@
     <button id="strum">Strum</button>
     <button id="stop">Stop</button>
     <button id="analyze">Envelope + attacks + FFT</button>
+    <button id="selftest">Self-test</button>
   </div>
 
   <h1>Analysis</h1>
@@ -54,17 +58,18 @@
 
   <h1>Real-guitar comparison</h1>
   <p class="hint">Record a clean strum of the selected chord through your mic (or load a .wav/.mp3),
-    then <b>Compare vs synth</b>: the real synth renders offline and its envelope/decay is
-    overlaid on your recording. The mic is for reference only — nothing plays during recording.
+    then <b>Compare vs engine</b>: the app renders the same voicing offline through the currently
+    selected engine (kit / samples / synth) and its envelope/decay is overlaid on your recording.
+    The mic is for reference only — nothing plays during recording.
     Start with the single-string presets (E2..E4): one note isolates that string's decay so you
-    can tune it before chords blend everything.</p>
+    can tune it before chords blend everything. Save records tag the exact engine + kit used.</p>
   <div class="row">
     <button id="rec">Record (mic)</button>
     <button id="load">Load audio file…</button>
     <input type="file" id="file" accept="audio/*" hidden />
-    <button id="compare">Compare vs synth</button>
+    <button id="compare">Compare vs engine</button>
     <button id="playRef">Play reference</button>
-    <button id="playSynth">Play synth</button>
+    <button id="playSynth">Play engine</button>
   </div>
   <div class="row"><canvas id="ref" width="640" height="140"></canvas></div>
   <div class="row"><canvas id="strip" width="640" height="56"></canvas></div>
@@ -84,12 +89,14 @@
   <pre id="saved"></pre>
   <p id="refStatus">no reference yet</p>
 
-  <h1>Recorded body IR</h1>
-  <p class="hint">The synth's "box" is a static EQ — the one thing keeping it from sounding
-    like a guitar (progress 13: synthetic body IRs wobbled by ear, twice). Capture a real one:
-    click <b>Capture body IR</b>, wait for the prompt, knock gently on the top near the bridge.
-    It auto-finds the knock, auto-crops, and applies it to the whole synth. (That's the one-click
-    path. Fine control: record normally, crop Start/End over the strip, then "Set crop as body IR".)</p>
+  <details id="ir-legacy">
+  <summary><h1 style="display:inline">Legacy: recorded body IR (synth path only)</h1></summary>
+  <p class="hint">Only the K–S <b>synth</b> engine convolved strings with a body IR — the smplr kit and
+    the recorded samples bypass body EQ/IR/room entirely (a real guitar already carries its own body,
+    progress 19). The captured IR is legacy from the synth-tuning era and should be cleared; this
+    section stays only for tuning the synth path. <b>Capture body IR</b>: click, wait for the prompt,
+    knock gently on the top near the bridge. It auto-finds the knock, auto-crops, and applies it.
+    (Fine control: record normally, crop Start/End over the strip, then "Set crop as body IR".)</p>
   <div class="row">
     <button id="captureIR">Capture body IR</button>
     <button id="setIR">Set crop as body IR</button>
@@ -100,11 +107,13 @@
     <span id="irLevelLabel">0.50</span>
   </div>
   <p id="irStatus">no body IR loaded (static EQ body)</p>
+</details>
 
   <h1>Guitar engine</h1>
   <p class="hint">Which engine produces guitar voicings. <b>smplr kit</b> plays a real GM
-    steel-guitar sample (self-hosted <code>assets/guitar-steel-ogg.js</code>, ~2.6 MB,
-    decoded once into six per-string instruments); <b>recorded samples</b> plays your
+    guitar sample (self-hosted <code>assets/guitar-steel-ogg.js</code> and
+    <code>guitar-nylon-ogg.js</code>, ~2 MB each, decoded once into six per-string
+    instruments); <b>recorded samples</b> plays your
     open-string recordings below; <b>K–S synth</b> is the Karplus–Strong fallback. The
     kit is pre-loaded on page load; a play that lands mid-decode waits for it (up to
     ~8s) so the first sound is the kit — only a stuck/failed kit falls back.</p>
@@ -113,15 +122,19 @@
     <label for="engSamples"><input type="radio" name="engine" id="engSamples" value="samples" /> recorded samples</label>
     <label for="engSynth"><input type="radio" name="engine" id="engSynth" value="synth" /> K–S synth</label>
   </div>
+  <div class="row">
+    <label for="kitSteel"><input type="radio" name="kit" id="kitSteel" value="steel" /> steel-string</label>
+    <label for="kitNylon"><input type="radio" name="kit" id="kitNylon" value="nylon" /> classical nylon</label>
+  </div>
   <p id="engStatus">checking…</p>
 
   <h1>Sample playback (your own guitar)</h1>
-  <p class="hint">Stop synthesizing a guitar and just use yours: record the six open
-    strings once, each in one click. Every voicing is then played by transposing the
-    <b>nearest recorded string</b> to the fretted note, so the whole fretboard comes out
-    of these six recordings (~a few semitones max). Pluck cleanly, hold, let it ring,
-    press the button again to stop. Clear the body IR above too — samples carry their
-    own body.</p>
+  <p class="hint"><b>Second engine / fallback</b> (progress 20): stop synthesizing a guitar
+    and just use yours — record the six open strings once, each in one click. Every voicing is
+    then played by transposing the <b>nearest recorded string</b> to the fretted note, so the
+    whole fretboard comes out of these six recordings (~a few semitones max). Pluck cleanly,
+    hold, let it ring, press the button again to stop. The smplr kit is the default engine;
+    this bank is selected via the engine radio and used as fallback while/if the kit fails.</p>
   <div class="row">
     <button data-sample="0">E2</button>
     <button data-sample="1">A2</button>
@@ -137,7 +150,8 @@
   <p id="smpStatus">no samples recorded — synth playback</p>
 
   <script type="module">
-    import { playVoicing, stopAudio, debugTap, getAudioDebugEvents, renderOfflineVoicing, configSnapshot, setBodyIRFromPcm, clearBodyIR, setBodyIRLevel, getBodyIRStatus, getBodyIRWav, prewarm, preloadGuitarEngine, setSample, clearSamples, setSamplesEnabled, getSamplesStatus, getSampleWav, setEngineMode, getSmplrStatus } from "../dist/audio.js";
+    import { parseSoundfontJs } from "../dist/synth/smplr.js";
+    import { playVoicing, stopAudio, debugTap, getAudioDebugEvents, renderOfflineVoicing, configSnapshot, setBodyIRFromPcm, clearBodyIR, setBodyIRLevel, getBodyIRStatus, getBodyIRWav, prewarm, preloadGuitarEngine, setSample, clearSamples, setSamplesEnabled, getSamplesStatus, getSampleWav, setEngineMode, setGuitarKit, getSmplrStatus } from "../dist/audio.js";
 
     const TUNING = [40, 45, 50, 55, 59, 64];
     const PRESETS = {
@@ -170,18 +184,64 @@
     const ectx = envCanvas.getContext("2d");
 
     let tap = null;
+    const lastPlayedEl = $("lastPlayed");
+    let eventMarker = 0;
+    let lastPlayedPoll = 0;
 
     function log(msg) {
       out.textContent += msg + "\n";
       console.log("[dbg] " + msg);
     }
 
+    /** One-line-per-voice ground truth of what actually scheduled. */
+    function summarizePlayback(evs) {
+      if (!evs.length) return "0 voices — nothing scheduled";
+      const t0 = evs[0].time;
+      const kinds = {};
+      for (const e of evs) kinds[e.kind] = (kinds[e.kind] || 0) + 1;
+      const st = getSmplrStatus();
+      const eng =
+        kinds.kit ? `smplr kit (${st.kit === "nylon" ? "classical nylon" : "steel-string acoustic"})` :
+        kinds.sample ? "recorded-sample engine" :
+        "K–S synth engine";
+      const parts = evs.map((e) => {
+        const time = "+" + ((e.time - t0) * 1000).toFixed(0).padStart(4) + "ms";
+        const extra =
+          e.kind === "kit" ? (e.velocity != null ? " vel=" + e.velocity : "") :
+          e.kind === "sample" ? (e.shift != null ? " shift=" + (e.shift > 0 ? "+" : "") + e.shift + "st" : "") :
+          " b=" + e.brightness.toFixed(2);
+        return time + "  " + nameOf(e.freq).padStart(4) + "  " + e.role.padEnd(5) +
+          " pan=" + e.pan.toFixed(2) + extra;
+      });
+      return Object.entries(kinds).map(([k, n]) => n + "\u00d7 " + k).join(" + ") +
+        "  \u2192  " + eng + "\n" + parts.join("\n");
+    }
+
+    /** Track events since the last strum; the kit path may wait ~8s first. */
+    function pollLastPlayed() {
+      clearTimeout(lastPlayedPoll);
+      const started = Date.now();
+      const check = () => {
+        const fresh = getAudioDebugEvents().slice(eventMarker);
+        if (fresh.length) {
+          lastPlayedEl.textContent = summarizePlayback(fresh);
+          return;
+        }
+        if (Date.now() - started < 12000) lastPlayedPoll = setTimeout(check, 200);
+        else lastPlayedEl.textContent = "still nothing scheduled \u2014 check engine status below";
+      };
+      check();
+    }
+
     function strum(preset) {
       stopAudio();
       tap = debugTap();
       if (tap) tap.fftSize = 1024; // 21ms window -> fine enough to resolve strum steps
+      eventMarker = getAudioDebugEvents().length;
+      lastPlayedEl.textContent = "playing " + preset + "\u2026";
       playVoicing(PRESETS[preset], TUNING);
       status.textContent = "played " + preset + " (" + PRESETS[preset].filter((f) => f !== null).length + " strings)";
+      pollLastPlayed();
     }
 
     $("strum").addEventListener("click", () => {
@@ -231,6 +291,23 @@
       return out;
     }
 
+    // Per-kind voice line: the synth palette (b/d/dc/s/pk/…) only exists for
+    // kind "voice"; kit events carry velocity, sample events carry the shift.
+    function evLine(e, t0) {
+      const head = "  +" + ((e.time - t0) * 1000).toFixed(0).padStart(4) + "ms  " +
+        e.kind.padStart(6) + "  " + nameOf(e.freq).padStart(4) +
+        "  " + e.role.padEnd(5) + " peak=" + e.peak.toFixed(3) + " pan=" + e.pan.toFixed(2);
+      if (e.kind === "kit") return head + "  vel=" + (e.velocity ?? "-") + "  ~" + nameOf(e.freq);
+      if (e.kind === "sample") return head + "  midi=" + (e.midi ?? "-") + " shift=" + (e.shift ?? 0) + "st  ~" + nameOf(e.freq);
+      return head + "  b=" + e.brightness.toFixed(2) + " d=" + e.damping.toFixed(2) +
+        " dc=" + e.decay.toFixed(2) + " s=" + e.sustain.toFixed(5) +
+        " pk=" + e.pick.toFixed(2) + " pb=" + e.pickBright.toFixed(2) +
+        " pd=" + e.pickDecayMs.toFixed(1) +
+        " life=" + e.lifeAmt.toFixed(4) + " thump=" + e.thump.toFixed(2) +
+        " bl=" + e.bloom.toFixed(2) +
+        " att=" + e.attackMs + "ms  ~" + nameOf(e.freq);
+    }
+
     $("analyze").addEventListener("click", () => {
       out.textContent = "";
       if (!tap) { log("no analyser yet — click Strum first"); return; }
@@ -251,15 +328,7 @@
         const busy = evs.filter((e) => e.peak > 0);
         log("Scheduled voices (" + evs.length + "):");
         for (const e of evs) {
-          log("  +" + ((e.time - t0) * 1000).toFixed(0).padStart(4) + "ms  " + e.freq.toFixed(1) + "Hz" +
-              "  " + e.role.padEnd(5) + " peak=" + e.peak.toFixed(3) + " pan=" + e.pan.toFixed(2) +
-              "  b=" + e.brightness.toFixed(2) + " d=" + e.damping.toFixed(2) +
-              " dc=" + e.decay.toFixed(2) + " s=" + e.sustain.toFixed(5) +
-              " pk=" + e.pick.toFixed(2) + " pb=" + e.pickBright.toFixed(2) +
-              " pd=" + e.pickDecayMs.toFixed(1) +
-              " life=" + e.lifeAmt.toFixed(4) + " thump=" + e.thump.toFixed(2) +
-              " bl=" + e.bloom.toFixed(2) +
-              " att=" + e.attackMs + "ms  ~" + nameOf(e.freq));
+          log(evLine(e, t0));
         }
         const spacing = evs.length > 1 ? (evs[1].time - evs[0].time) * 1000 : 0;
         log("→ " + evs.length + " voice(s) scheduled, " + spacing.toFixed(0) + "ms apart" +
@@ -309,10 +378,10 @@
     let reference = null; // { data: Float32Array, sampleRate: number, label: string, crop: {start,end} }
     let lastRefBins = null;   // onset-aligned bins of the cropped reference
     let lastRefStats = null;  // enriched stats of the cropped reference
-    let lastSynthBins = null;
-    let lastSynthStats = null;
-    let lastSynthLabel = null;
-    let lastSynthConfig = null; // DEFAULT_CONFIG snapshot at render time
+    let lastEngineBins = null;
+    let lastEngineStats = null;
+    let lastEngineLabel = null;
+    let lastEngineConfig = null; // DEFAULT_CONFIG snapshot at render time
     let recTicker = null;
     let refCtx = null;
     let recorder = null;
@@ -321,7 +390,7 @@
     let synthBuffer = null;   // last offline render, converted to a playable buffer
     let playingSource = null; // whichever source is sounding now
     let statusBeforePlay = "";
-    const PLAY_LABELS = { playRef: "Play reference", playSynth: "Play synth" };
+    const PLAY_LABELS = { playRef: "Play reference", playSynth: "Play engine" };
 
     function stopPlayback() {
       if (playingSource) {
@@ -415,7 +484,7 @@
       return { attackMs: s.peakMs, d20: s.d20, d40: s.d40, peakAbs: peakAbsValue, dbAt1s: at(1), dbAt2s: at(2), dbAt5s: at(5), env };
     }
 
-    function drawOverlay(refBins, synthBins, refLabel, synthLabel) {
+    function drawOverlay(refBins, engineBins, refLabel, engineLabel) {
       rctx.clearRect(0, 0, refCanvas.width, refCanvas.height);
       const w = refCanvas.width, h = refCanvas.height;
       const dBFloor = -70;
@@ -436,7 +505,7 @@
         rctx.fillText(label, 6, color === "#4caf50" ? 20 : 34);
       };
       plot(refBins, "#ffb054", refLabel);
-      plot(synthBins, "#4caf50", synthLabel);
+      plot(engineBins, "#4caf50", engineLabel);
       rctx.strokeStyle = "#555";
       rctx.beginPath(); rctx.moveTo(0, h - 4); rctx.lineTo(w, h - 4); rctx.stroke();
       rctx.fillStyle = "#666";
@@ -507,7 +576,7 @@
         "s, attack→peak " + lastRefStats.attackMs + "ms, -20dB at " + lastRefStats.d20 +
         "ms, -40dB at " + lastRefStats.d40 + "ms" +
         "  (db@1/2/5s: " + [1, 2, 5].map((t) => lastRefStats["dbAt" + t + "s"] ?? "–").join("/") + ")";
-      drawOverlay(bins, lastSynthBins || [], reference.label, lastSynthLabel || "(none yet)");
+      drawOverlay(bins, lastEngineBins || [], reference.label, lastEngineLabel || "(none yet)");
     }
 
     /** Clamp + apply the two crop sliders; the crop IS the reference now. */
@@ -609,7 +678,10 @@
       const preset = $("preset").value;
       const frets = PRESETS[preset];
       const label = PRESET_LABELS[preset] ?? preset;
-      refStatus.textContent = "rendering synth offline…";
+      const st0 = getSmplrStatus();
+      const engineDesc = st0.mode === "smplr" ? ("engine smplr-" + (st0.kit === "nylon" ? "nylon" : "steel")) :
+        st0.mode === "samples" ? "engine samples" : "engine synth";
+      refStatus.textContent = "rendering " + engineDesc + " offline…";
       const seconds = Math.max(2.5, Math.min(8, reference.data.length / reference.sampleRate));
       const rendered = await renderOfflineVoicing(frets, TUNING, seconds);
       if (!rendered) { refStatus.textContent = "offline render failed"; return; }
@@ -617,15 +689,15 @@
       synthBuffer = refCtx.createBuffer(2, rendered.left.length, 48000);
       synthBuffer.copyToChannel(rendered.left, 0);
       synthBuffer.copyToChannel(rendered.right, 1);
-      const synthBins = onsetAligned(rmsBins(rendered.left, 48000));
-      lastSynthBins = synthBins;
-      lastSynthStats = statsPlus(synthBins, 10, peakAbs(rendered.left));
-      lastSynthLabel = "synth " + label;
-      lastSynthConfig = configSnapshot();
+      const engineBins = onsetAligned(rmsBins(rendered.left, 48000));
+      lastEngineBins = engineBins;
+      lastEngineStats = statsPlus(engineBins, 10, peakAbs(rendered.left));
+      lastEngineLabel = engineDesc + " " + label;
+      lastEngineConfig = configSnapshot();
       refStatus.textContent =
-        "synth " + label + " — attack→peak " + lastSynthStats.attackMs + "ms, -20dB at " + lastSynthStats.d20 + "ms, -40dB at " + lastSynthStats.d40 + "ms" +
+        engineDesc + " " + label + " — attack→peak " + lastEngineStats.attackMs + "ms, -20dB at " + lastEngineStats.d20 + "ms, -40dB at " + lastEngineStats.d40 + "ms" +
         "  |  real: " + refText;
-      drawOverlay(lastRefBins || [], synthBins, reference.label, lastSynthLabel);
+      drawOverlay(lastRefBins || [], engineBins, reference.label, lastEngineLabel);
     });
 
     $("save").addEventListener("click", async () => {
@@ -633,9 +705,10 @@
       const record = {
         ts: new Date().toISOString(),
         preset: $("preset").value,
-        // Exact knobs that produced the synth curve — lets a saved "synth
-        // -40dB at 850ms" be reproduced (or blamed) with full fidelity.
-        config: lastSynthConfig,
+        // Exact knobs that produced the engine curve — lets a saved "-40dB at
+        // 850ms" be reproduced (or blamed) with full fidelity.
+        config: lastEngineConfig,
+        engine: (() => { const s = getSmplrStatus(); return { mode: s.mode, kit: s.kit }; })(),
         ref: {
           name: reference.label,
           sampleRate: reference.sampleRate,
@@ -646,13 +719,13 @@
           peak: lastRefStats.peakAbs,
           env: lastRefStats.env, // dB-below-peak envelope, 10ms bins, cropped
         },
-        synth: lastSynthStats ? {
-          label: lastSynthLabel,
-          duration: +(lastSynthBins.length * 0.01).toFixed(2),
-          attackMs: lastSynthStats.attackMs, d20: lastSynthStats.d20, d40: lastSynthStats.d40,
-          dbAt1s: lastSynthStats.dbAt1s, dbAt2s: lastSynthStats.dbAt2s, dbAt5s: lastSynthStats.dbAt5s,
-          peak: lastSynthStats.peakAbs,
-          env: lastSynthStats.env,
+        synth: lastEngineStats ? {
+          label: lastEngineLabel,
+          duration: +(lastEngineBins.length * 0.01).toFixed(2),
+          attackMs: lastEngineStats.attackMs, d20: lastEngineStats.d20, d40: lastEngineStats.d40,
+          dbAt1s: lastEngineStats.dbAt1s, dbAt2s: lastEngineStats.dbAt2s, dbAt5s: lastEngineStats.dbAt5s,
+          peak: lastEngineStats.peakAbs,
+          env: lastEngineStats.env,
         } : null,
         note: $("note").value.trim() || null,
       };
@@ -685,8 +758,9 @@
               const fmt = (o, k) => o && o[k] != null ? o[k] : (o && o["attack"] != null && k === "attackMs" ? o.attack : "–");
               const real = r.ref ? "real " + fmt(r.ref, "attackMs") + "/" + fmt(r.ref, "d20") + "/" + fmt(r.ref, "d40") + "ms" +
                 (r.ref.dbAt1s != null ? "  @" + [1, 2, 5].map((s) => r.ref["dbAt" + s + "s"]).join("/") + "dB" : "") : "no ref";
-              const synth = r.synth ? "synth " + fmt(r.synth, "attackMs") + "/" + fmt(r.synth, "d20") + "/" + fmt(r.synth, "d40") + "ms" +
-                (r.synth.dbAt1s != null ? "  @" + [1, 2, 5].map((s) => r.synth["dbAt" + s + "s"]).join("/") + "dB" : "") : "no synth";
+              const engTag = r.engine ? r.engine.mode + (r.engine.kit ? "/" + r.engine.kit : "") : (r.synth ? "synth" : "?");
+              const synth = (r.synth ? engTag + " " + fmt(r.synth, "attackMs") + "/" + fmt(r.synth, "d20") + "/" + fmt(r.synth, "d40") + "ms" +
+                (r.synth.dbAt1s != null ? "  @" + [1, 2, 5].map((s) => r.synth["dbAt" + s + "s"]).join("/") + "dB" : "") : "no engine render");
               return t + "  " + r.preset + "  " + (r.ref && r.ref.name ? r.ref.name : "") + "  " + crop + "  |  " + real + "  |  " + synth + (r.note ? "  — " + r.note : "");
             }).join("\n")
           : "(empty save file)";
@@ -798,12 +872,12 @@ loadSaved();
       refStatus.textContent = "playing reference — compare by ear";
     });
     $("playSynth").addEventListener("click", () => {
-      if (!synthBuffer) { refStatus.textContent = "run Compare vs synth first"; return; }
+      if (!synthBuffer) { refStatus.textContent = "run Compare vs engine first"; return; }
       if (playingSource && $("playSynth").textContent === "Stop") { stopPlayback(); return; }
       statusBeforePlay = refStatus.textContent;
       playSource(synthBuffer);
       $("playSynth").textContent = "Stop";
-      refStatus.textContent = "playing synth render — compare by ear";
+      refStatus.textContent = "playing engine render — compare by ear";
     });
 
     // -----------------------------------------------------------------------
@@ -910,24 +984,37 @@ loadSaved();
     // The radio reflects `getSmplrStatus().mode` (which reads the config); choosing
     // "smplr kit" starts the ~2.6 MB kit decode if it isn't already loaded.
     const engInputs = [...document.querySelectorAll('input[name="engine"]')];
+    const kitInputs = [...document.querySelectorAll('input[name="kit"]')];
     const engStatusEl = $("engStatus");
     function refreshEngine() {
       const st = getSmplrStatus();
       engInputs.forEach((el) => (el.checked = el.value === st.mode));
+      kitInputs.forEach((el) => (el.checked = el.value === st.kit));
+      const kitLabel = st.kit === "nylon" ? "classical nylon" : "steel-string acoustic";
       const p = st.progress;
       engStatusEl.textContent =
         st.mode === "smplr"
           ? st.ready
-            ? "smplr kit loaded & ready — 6 per-string instruments on their own gates + seats"
+            ? `smplr kit (${kitLabel}) loaded & ready — 6 per-string instruments on their own gates + seats`
             : p.total
-              ? `smplr kit loading… ${p.loaded}/${p.total} samples`
+              ? `smplr kit (${kitLabel}) loading… ${p.loaded}/${p.total} samples`
               : st.loading
-                ? "smplr kit decoding… (engine built; the first play waits for it, up to ~8s)"
-                : "smplr kit not loaded — the first play builds + decodes it"
+                ? `smplr kit (${kitLabel}) decoding… (engine built; the first play waits for it, up to ~8s)`
+                : `smplr kit (${kitLabel}) not loaded — the first play builds + decodes it`
           : st.mode === "samples"
-            ? "recorded-sample engine (K–S synth fills the gaps) — smplr kit " + (st.ready ? "loaded" : "not loaded")
+            ? `recorded-sample engine (K–S synth fills the gaps) — smplr kit (${kitLabel}) ` + (st.ready ? "loaded" : "not loaded")
             : "Karplus–Strong synth engine — smplr kit " + (st.ready ? "loaded" : "not loaded");
     }
+    kitInputs.forEach((el) =>
+      el.addEventListener("change", () => {
+        setGuitarKit(el.value);
+        refreshEngine();
+        const poll = setInterval(() => {
+          refreshEngine();
+          if (getSmplrStatus().ready) clearInterval(poll);
+        }, 250);
+      }),
+    );
     engInputs.forEach((el) =>
       el.addEventListener("change", () => {
         setEngineMode(el.value);
@@ -945,6 +1032,10 @@ loadSaved();
     // scripting the page, e.g. headless dump-dom probes).
     const forced = new URLSearchParams(location.search).get("engine");
     if (forced && ["smplr", "samples", "synth"].includes(forced)) setEngineMode(forced);
+    // Optional ?kit=steel|nylon mirrors the engine param (and is applied before
+    // the preload below, so ?engine=smplr&kit=nylon primes the nylon kit).
+    const forcedKit = new URLSearchParams(location.search).get("kit");
+    if (forcedKit === "steel" || forcedKit === "nylon") setGuitarKit(forcedKit);
     // The default engine is smplr: build the audio path + start the kit load on
     // arrival (same path as picking the radio) so the first strum is the kit
     // itself, not the fallback. Keeps the progress line live until ready.
@@ -956,6 +1047,93 @@ loadSaved();
       }, 250);
     }
     refreshEngine();
+
+    // -----------------------------------------------------------------------
+    // Self-test (?selftest=1 or the button): run the same invariants the Node
+    // suite asserts (scripts/audio-sched.mjs), but live in this browser. Writes
+    // ok/FAIL lines to #out and a machine-readable window.__audit. The page
+    // itself becomes the diagnostic — no devtools round-trip needed to know
+    // "did the kit actually play?".
+    // -----------------------------------------------------------------------
+    const KIT_ASSETS = [
+      { name: "steel", url: "../assets/guitar-steel-ogg.js" },
+      { name: "nylon", url: "../assets/guitar-nylon-ogg.js" },
+    ];
+
+    async function checkKitParse(check) {
+      for (const asset of KIT_ASSETS) {
+        try {
+          const res = await fetch(asset.url);
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          const parsed = parseSoundfontJs(await res.text());
+          const names = Object.keys(parsed);
+          const first = names.length ? atob(parsed[names[0]]) : "";
+          const ogg = first.slice(0, 4) === "OggS";
+          check(names.length >= 88 && ogg,
+            `${asset.name}: 88 notes parse + OggS`,
+            `${asset.name}: got ${names.length} notes, OggS=${ogg}`);
+        } catch (err) {
+          check(null, "fail", `${asset.name}: ${err.message}`);
+        }
+      }
+    }
+
+    async function runSelfTest() {
+      out.textContent = "";
+      const checks = [];
+      const check = (cond, name, detail) => {
+        cond = typeof cond === "function" ? cond() : cond;
+        const verdict = cond === true ? "ok" : cond === "skip" ? "skip" : "FAIL";
+        checks.push({ name, ok: verdict !== "FAIL", detail });
+        log((verdict === "ok" ? "  ok  " : verdict === "skip" ? "  skip" : "  FAIL") + "  " + name + (detail ? "  (" + detail + ")" : ""));
+      };
+      log("SELF-TEST\n- parse the shipped kits (the bug that shipped was here):");
+      await checkKitParse(check);
+      const st = () => getSmplrStatus();
+      log("- engine state:");
+      if (st().mode === "smplr") {
+        log("  waiting for kit readiness…");
+        const t0 = Date.now();
+        while (!st().ready) {
+          if (Date.now() - t0 > 15000) break;
+          await new Promise((r) => setTimeout(r, 250));
+        }
+        check(() => st().ready, "smplr kit ready", `status=${st().ready} progress=${st().progress.loaded}/${st().progress.total}`);
+        if (st().ready) {
+          log("- strum openC and inspect what actually scheduled:");
+          eventMarker = getAudioDebugEvents().length;
+          playVoicing(PRESETS.openC, TUNING);
+          const t1 = Date.now();
+          while (getAudioDebugEvents().length <= eventMarker) {
+            if (Date.now() - t1 > 12000) break;
+            await new Promise((r) => setTimeout(r, 200));
+          }
+          const evs = getAudioDebugEvents().slice(eventMarker);
+          check(() => evs.length === 6, "6 voices scheduled", evs.length + " scheduled");
+          check(() => evs.every((e) => e.kind === "kit"), "all from the smplr kit (kind=kit)", evs.map((e) => e.kind).join(",") || "none");
+          const pans = evs.map((e) => e.pan);
+          const t0e = evs.length ? evs[0].time : 0;
+          const spread = evs.length > 1 ? (evs[evs.length - 1].time - t0e) * 1000 : 0;
+          check(() => new Set(pans).size === pans.length && new Set(pans).size >= 6, "six distinct pans", pans.map((p) => p.toFixed(2)).join(","));
+          check(() => pans.length < 2 || pans[pans.length - 1] > pans[0], "bass-left → treble-right", pans.length ? pans.map((p) => p.toFixed(2)).join(",") : "none");
+          check(() => spread >= 300, "strum spread", spread.toFixed(0) + "ms");
+          check(() => evs.some((e) => e.role === "root") && evs.some((e) => e.role === "color"), "root + color roles", evs.map((e) => e.role).join(",") || "none");
+          check(() => evs.every((e) => e.velocity != null && e.velocity >= 1 && e.velocity <= 127), "velocities in 1..127", evs.map((e) => e.velocity).join(",") || "none");
+          log(summarizePlayback(evs));
+        } else {
+          check(false, "smplr kit readiness", "not ready after 15s — see engine status below");
+        }
+      } else {
+        check("skip", "smplr kit ready", "engine forced to " + st().mode + " — kit checks skipped");
+      }
+      check(() => !!("AudioContext" in window), "Web Audio present", "");
+      const failed = checks.filter((c) => c.ok === false);
+      window.__audit = { ok: failed.length === 0, checks };
+      log(failed.length ? "SELF-TEST FAIL (" + failed.length + " failing)" : "SELF-TEST PASS — all checks ok");
+      console.log("__audit", window.__audit);
+    }
+    $("selftest").addEventListener("click", runSelfTest);
+    if (new URLSearchParams(location.search).get("selftest")) runSelfTest();
   </script>
 </body>
 </html>
