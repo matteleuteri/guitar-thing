@@ -1,4 +1,4 @@
-import { stopAudio, playNotes, playVoicing, preloadGuitarEngine } from "./audio.js";
+import { stopAudio, playNotes, playVoicing, preloadGuitarEngine, getSmplrStatus, getAudioDebugEvents } from "./audio.js";
 import { DEFAULT_CONFIG } from "./synth/config.js";
 import { findFingerings, type Fingering } from "./fretboard.js";
 import { findPianoVoicings, type PianoVoicing } from "./piano.js";
@@ -29,6 +29,13 @@ function isPianoChord(chord: GuitarSongChord | PianoSongChord): chord is PianoSo
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  // Console ground truth for what the page actually plays: `__audio.status()`
+  // (kit ready/loading) and `__audio.debug()` (the last voices: kind, midi,
+  // role, time). Permanent, like `getAudioDebugEvents` in audio.ts.
+  (globalThis as { __audio?: unknown }).__audio = {
+    status: getSmplrStatus,
+    debug: getAudioDebugEvents,
+  };
   // Start the audio graph + smplr kit fetch/decode right away (no gesture
   // needed: the context is created suspended) so the FIRST voicing click
   // already plays the real guitar kit instead of the samples/synth fallback

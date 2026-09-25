@@ -11,7 +11,6 @@
  */
 
 import { DEFAULT_CONFIG } from "./config.js";
-import { TUNINGS } from "../theory.js";
 import {
   trimToOnset,
   resampleLinear,
@@ -25,7 +24,6 @@ import {
  *  localStorage's ~5 MB while still covering the strings' harmonics. */
 const SAMPLE_SR = 24000;
 const STORAGE_KEY = "guitar-thing.string-samples";
-const STANDARD_TUNING = TUNINGS[0].midi;
 
 export interface StringSample {
   /** Which string this started as (0 = thickest/lowest). */
@@ -225,7 +223,10 @@ function persist(): void {
   }
 }
 
-/** Best-effort: restore the bank from localStorage, then shipped asset WAVs. */
+/** Best-effort: restore a bank the user recorded on this origin. No
+ *  shipped-asset fallback — the six-bedroom-laptop-mic bank (progress 20) was
+ *  verdicted "just not sounding good", so a fresh origin gets the K–S synth
+ *  rather than a single mismatched E2 sample playing everything. */
 export async function loadStoredSamples(): Promise<void> {
   const load = ({ pcm, sampleRate }: { pcm: Float32Array; sampleRate: number }, midi: number, i: number): void => {
     bank[i] = processSample(pcm, sampleRate, i, midi);
@@ -237,21 +238,9 @@ export async function loadStoredSamples(): Promise<void> {
       (record.samples ?? []).forEach((entry, i) => {
         if (entry) load(decodeWavMono(base64ToArrayBuffer(entry.wav)), entry.midi, i);
       });
-      return;
     }
   } catch {
-    /* corrupt/old format — fall through to the shipped assets */
-  }
-  try {
-    await Promise.all(
-      STANDARD_TUNING.map(async (midi, i) => {
-        const res = await fetch(`assets/string-${i}.wav`); // page-relative → site root
-        if (!res.ok || (res.status as number) >= 400) return;
-        load(decodeWavMono(await res.arrayBuffer()), midi, i);
-      }),
-    );
-  } catch {
-    /* no shipped samples — plain synth, as expected */
+    /* corrupt/old format — plain synth, as expected */
   }
 }
 

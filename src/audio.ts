@@ -92,8 +92,8 @@ function ensure(): Promise<void> {
     context.resume().catch(() => undefined);
     graph = buildSharedGraph(context, DEFAULT_CONFIG);
     applyBodyIR(context, graph);
-    // Fire-and-forget: pick up a stored/shipped body IR and any recorded
-    // string samples so they're ready for the first play without blocking the
+    // Fire-and-forget: pick up a stored body IR and any recorded string
+    // samples so they're ready for the first play without blocking the
     // click that built the audio path.
     void loadStoredBodyIR();
     void loadStoredSamples();
@@ -214,25 +214,22 @@ function persistIr(): void {
   }
 }
 
-/** Best-effort: restore the body IR from localStorage, then a shipped asset. */
+/** Best-effort: restore a body IR the user captured on this origin. No
+ *  shipped-asset fallback — the committed knock IR (progress 19) was a poor
+ *  laptop capture that read as "staticy" when convolved, so a fresh origin
+ *  gets the plain EQ body (pure bypass) instead. */
 async function loadStoredBodyIR(): Promise<void> {
   try {
     const stored = localStorage.getItem(IR_STORAGE_KEY);
-    const from = (buf: ArrayBuffer, origin: "recording" | "asset"): void => {
-      void context?.decodeAudioData(buf).then((audioBuffer) => {
-        const mono = mixToMono(audioBuffer);
-        irSource = { ...processIr(mono, audioBuffer.sampleRate), origin };
-        if (context && graph) applyBodyIR(context, graph);
-      }).catch(() => undefined);
-    };
-    if (stored) {
-      from(base64ToArrayBuffer(stored), "recording");
-      return;
-    }
-    const res = await fetch("assets/body-ir.wav"); // page-relative → site root
-    if (res.ok) from(await res.arrayBuffer(), "asset");
+    if (!stored) return; // plain EQ body, as approved
+    const buf = base64ToArrayBuffer(stored);
+    void context?.decodeAudioData(buf).then((audioBuffer) => {
+      const mono = mixToMono(audioBuffer);
+      irSource = { ...processIr(mono, audioBuffer.sampleRate), origin: "recording" };
+      if (context && graph) applyBodyIR(context, graph);
+    }).catch(() => undefined);
   } catch {
-    /* no stored IR and no shipped asset — plain EQ body, as approved */
+    /* no stored IR — plain EQ body, as approved */
   }
 }
 

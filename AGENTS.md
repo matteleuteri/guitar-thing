@@ -121,10 +121,9 @@ from the local `dist/` (that folder is gitignored). CI owns it:
   server.mjs` → `localhost:5173`. Committing without pushing never affects the
   live site.
 - All asset paths in `index.html` (`style.css`, `./dist/main.js`, `debug/`) are
-  relative, so the `/guitar-thing/` subdirectory hosting works unchanged. A
-  committed `assets/body-ir.wav` (the recorded body IR, progress 19) is served
-  the same way and picked up by `audio.ts` via a page-relative fetch — see the
-  IR section in Audio below.
+  relative, so the `/guitar-thing/` subdirectory hosting works unchanged. The
+  audio catables (`assets/guitar-steel-ogg.js`, `assets/smplr.mjs`) ship the
+  same way — see the Audio section below.
 
 ## Structure
 
@@ -181,9 +180,10 @@ from the local `dist/` (that folder is gitignored). CI owns it:
   peak of the *first 95%* so an end-of-clip click never shrinks the whole
   note (clamped to ±1). Mapping is **nearest recorded string in pitch**
   (`nearestSample`), so the whole fretboard plays from six samples; persists
-  to localStorage (`guitar-thing.string-samples`) and falls back to shipped
-  `assets/string-N.wav`. Stored banks are RE-processed on load, so a code
-  change to the import repairs existing captures without re-recording.
+  to localStorage (`guitar-thing.string-samples`). Stored banks are RE-processed
+  on load, so a code change to the import repairs existing captures without
+  re-recording. No shipped fallback bank: the recorded bank was verdicted "not
+  sounding good", so a fresh origin plays the K–S synth instead.
 - `src/main.ts` — UI wiring, form handling, guitar/piano orchestration (entry point).
 - `scripts/smoke.mjs` — Node checks of the compiled theory/fingering output.
 - `scripts/audio-sched.mjs` — Node checks of the compiled audio *scheduling* graph
@@ -285,8 +285,10 @@ TypeScript is the only devDependency. No frameworks.
   rate (`irSource`) and is rebuilt as a `ConvolverNode` buffer at whatever
   context is playing (live or offline — `renderOfflineVoicing` includes it).
   Loading: on first `ensure()` it restores localStorage key
-  `guitar-thing.body-ir` (a base64 WAV), then falls back to a page-relative
-  `assets/body-ir.wav` so a committed asset serves everyone. The harness drives
+  `guitar-thing.body-ir` (a base64 WAV). NO shipped asset — the committed
+  knock IR (progress 19) was a poor laptop capture that read as "staticy"
+  when convolved, so a fresh origin gets the plain EQ body (pure bypass)
+  instead. The harness drives
   it live: `setBodyIRFromPcm(pcm, sr)` (the crop window), `setBodyIRBuffer(blob)`
   (an audio file), `clearBodyIR()`, `setBodyIRLevel(0..1)` and
   `getBodyIRStatus()`; `getBodyIRWav()` yields the normalized WAV for
@@ -302,8 +304,8 @@ TypeScript is the only devDependency. No frameworks.
   section) records each open string once; `setSample(i, midi, pcm, sr)`
   trims/caps/normalizes it (24 kHz mono, tail-capped by pitch so the lows ring
   ~9 s and the highs ~4–5 s, tail-faded, `samples.ts`) and stores it in
-  localStorage (`guitar-thing.string-samples`, falls back to shipped
-  `assets/string-N.wav`, N = string index). Playback: `scheduleSampleVoice`
+  localStorage (`guitar-thing.string-samples`, no shipped fallback bank).
+  Playback: `scheduleSampleVoice`
   (in `audio.ts`, chosen per-note in `scheduleGuitarVoicing` when
   `nearestSample(midi)` finds a match within `config.samples.maxShift` (12),
   else the worklet synth takes over) transposes the nearest recorded string by
@@ -586,10 +588,11 @@ register work is parked; guitar realism is the active thread. Candidate leads:
   The old shared body EQ is static — it shapes but never *rings*. A real
   guitar's top couples to the strings and resonates at fixed modes (monopole
   ~90–110 Hz, first ~200 Hz, treble peaks), which is most of "it sounds like a
-  box." The playback side is now a `ConvolverNode` fed by a real recorded IR:
-  **(a)** synthesized sines were tried twice and beat/wobbled badly by ear —
-  reverted (progress 13); **(b)** a *recorded* impulse (capture via the debug
-  harness, `config.ir.level` for the wet mix, shipped as `assets/body-ir.wav`)
+box." The playback side is now a `ConvolverNode` fed by a real recorded IR:
+   **(a)** synthesized sines were tried twice and beat/wobbled badly by ear —
+   reverted (progress 13); **(b)** a *recorded* impulse (capture via the debug
+   harness, `config.ir.level` for the wet mix, persisted to localStorage — the
+   committed laptop-mic knock read as "staticy" when convolved and was removed)
   is worth it and is now the active body. Never synthesize the IR.
 14. **Attacks separated from sample one — Lead C slice 1. Landed.** Before this,
     every string's pick scrape was the *same* first-differenced white noise,
@@ -717,9 +720,10 @@ register work is parked; guitar realism is the active thread. Candidate leads:
     applied live to the shared graph *and* persisted to localStorage
     (`guitar-thing.body-ir`, base64 WAV). `prewarm()` (exported) unlocks the
     audio context inside the capture gesture so the auto-strum is audible
-    immediately. On app startup the IR is restored from localStorage, else a
-    committed `assets/body-ir.wav` (page-relative fetch; the Pages workflow now
-    ships `assets/`). Mix knob `config.ir.level` (default 0.5, live-writable
+    immediately. On app startup the IR is restored from localStorage only;
+    there is NO shipped asset — the committed knock IR read as "staticy" when
+    convolved, so without a stored capture the body is the plain EQ (bypass).
+    Mix knob `config.ir.level` (default 0.5, live-writable
     via the harness "IR mix" slider / `setBodyIRLevel`). `renderOfflineVoicing`
     applies the IR too, so Compare-vs-synth renders the real body. **Do:**
     record a clean knock near the bridge, crop tight to the knock, play strings
@@ -748,8 +752,8 @@ register work is parked; guitar realism is the active thread. Candidate leads:
     body IR / room, because the recording already has body and room. Synth is
     the fallback when no sample is within range (or `setSamplesEnabled(false)`;
     partial banks mix both per-note). Piano + single fretboard dots unchanged.
-    Persisted to localStorage (`guitar-thing.string-samples`), fallback to
-    shipped `assets/string-N.wav` (Pages workflow already ships `assets/`).
+    Persisted to localStorage (`guitar-thing.string-samples`), no shipped
+    fallback bank.
     `scripts/audio-sched.mjs` now asserts six sample voices, silent-from-zero
     gates, strum spread, and that every shift maps a recorded open string to
     the target note. **Do:** record the six open strings cleanly (one click
