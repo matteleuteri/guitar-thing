@@ -23,13 +23,16 @@ A dependency-free browser app ("Note/Chord Finder") with two instrument modes:
 All approved audio work is merged into `main` (and pushed to `origin/main`):
 the physical string core (commuted triangle pluck at per-string `pickPos` →
 fractional-delay allpass → two-stage damping/`decay`), per-string scrape shape
-(`pickBright`/`pickDecayMs`) that separates onsets from the first sample, and
-the song/progression mode. `dev-audio` and `song-mode` are merged ancestors
-kept for history. **The user approved this sound:** Leads A + C-1 are done and
-sounded good. **Parked after user listening:** piano register identity (still
-reads as "one sound"), and the *synthesized* convolutional body IR, which
-beat/wobbled badly by ear twice and was reverted (a body is only worth
-retrying as a *recorded* IR).
+(`pickBright`/`pickDecayMs`) that separates onsets from the first sample, the
+song/progression mode, and — the current default sound — the **smplr sampled
+guitar kit** (progress 21), which the user ear-approved on the live site:
+guitar voicings play a real GM steel-guitar kit, and `ready: true` +
+`kind: "kit"` events confirm it. `dev-audio` and `song-mode` are merged
+ancestors kept for history. **Parked after user listening:** piano register
+identity (still reads as "one sound"), the *synthesized* convolutional body IR
+(beat/wobbled badly by ear twice and was reverted — a body is only worth
+retrying as a *recorded* IR), and the recorded-string sample bank (progress 20
+was verdicted "not sounding good" — superseded by the kit as the second engine).
 **Backlog (discuss before building):** the pitched pre-ring "slap" (the rest
 of Lead C), Lead D (spatialization), and the muted-string "thunk".
 
@@ -84,9 +87,9 @@ reads 0/0 through the whole decode phase — the harness status text says
 `globalThis.__SMPLR_FAKE__` (a stub smplr that records `start()` calls — the
 real package would fetch/decode a 2.6 MB kit under Node), asserted: six kit
 voices, notes = fretted midis, root/color velocities, fixed distinct pans,
-silent-from-zero gates, strum spread. **Needs an ear-check** at
-`/debug/audio-debug.html` ("Guitar engine" row) — smplr vs recorded-samples vs
-synth; the debug events now carry `kind: "kit"` + `velocity`.
+silent-from-zero gates, strum spread. **Ear-approved by the user on the live
+site (Sep 2026)** at `/debug/audio-debug.html` ("Guitar engine" row) — kit vs
+recorded-samples vs synth; debug events carry `kind: "kit"` + `velocity`.
 The recorded-string bank (progress 20) is now the *second* engine, not the
 target: the stored body IR should be **cleared**; the attack-bloom/sustain
 numbers are superseded in priority by the kit.
@@ -761,7 +764,7 @@ box." The playback side is now a `ConvolverNode` fed by a real recorded IR:
     in the harness and the main app. **Lesson earned:** a laptop-mic *knock*
     is a poor IR; a clean *plucked string* is a much better source — samples
     move the capture from "impulse response" to "the note itself".
-21. **smplr sampled guitar — the recording pivot. Landed, NEEDS EAR CHECK.**
+21. **smplr sampled guitar — the recording pivot. Landed + EAR-APPROVED.**
     The user recorded all six strings for progress 20, then verdicted the whole
     bank "just not sounding good" — the *source* was the bedroom laptop-mic
     recordings (AGC swell, mono, inconsistent takes), not the API. Per the
@@ -770,8 +773,12 @@ box." The playback side is now a `ConvolverNode` fed by a real recorded IR:
     consistent GM steel-guitar kit (MusyngKite `acoustic_guitar_steel`,
     self-hosted as `assets/guitar-steel-ogg.js`, ~2.6 MB, `MIDI.Soundfont` JS
     data format). Design: the kit text is parsed in a tiny `parseSoundfontJs`
-    (slice between the literal's first `{` and final `}` — JSON.parse of the
-    rest — then strip each value's `data:...base64,` prefix and `atob` it),
+    — anchored on the `MIDI.Soundfont.` marker then the first `=` after it (the
+    same rule smplr's own `midiJsToJson` uses), slicing to the table's final
+    `}`, with the MusyngKite trailing comma dropped before JSON.parse (a naive
+    "slice between the file's FIRST `{` and last `}`" is WRONG — the preamble's
+    `var MIDI = {};` starts with a `{` and throws immediately) — then each
+    value's `data:...base64,` prefix is stripped before `atob`,
     and decoded into a shared `Map<noteName, AudioBuffer>` with a SINGLE
     `decodeAudioData` pass per note, per context (cached in a `decodeCache`
     WeakMap so an engine rebuild on the same context doesn't re-decode). The
@@ -780,7 +787,24 @@ box." The playback side is now a `ConvolverNode` fed by a real recorded IR:
     synth); six per-string `Instrument` instances now share the one buffer
     map via `loadInstrument(soundfontToPreset(noteNames), buffers)`, and
     `ready` only gates routing once every string's instrument is loaded — a
-    failed decode (Safari lacks ogg/vorbis) just skips that note.
+    failed decode (Safari lacks ogg/vorbis) just skips that note (only
+    successfully decoded notes become preset regions, matching smplr's own
+    `decodeSoundfontFile`). **Gotcha that shipped (the kit NEVER played):
+    the original single-decode `parseSoundfontJs` sliced from the file's FIRST
+    `{`, which is the preamble's `var MIDI = {};` — JSON.parse threw
+    "Unexpected non-whitespace character after JSON at position 2" and every
+    page silently fell back to samples/synth for weeks. Symptom that found it:
+    on the live site `__audio.status()` (put on `window` in `main.ts`) read
+    `{ready: false, loading: false}` — engine null — and the console showed
+    the parse SyntaxError at `parseSoundfontJs`. The "sounds great locally"
+    imports were the *recorded-sample bank*, not the kit; and the pre-IR-cleanup
+    "staticy" live complaints were the IR-convolved synth fallback. Fixed by
+    anchoring on `MIDI.Soundfont.` + `=` and trimming the trailing comma
+    (`d8c77a5`); `scripts/audio-sched.mjs` now regression-parses the REAL kit
+    asset (88 notes, OggS magic) so it can never silently break again. A kit
+    load failure also gets ONE bounded retry (`primeGuitarEngine(attempt)`),
+    and a rejected `decodeKitOnce` clears itself from the cache so the retry
+    fetches + decodes fresh instead of reusing the dead promise.
     The music survives engine swap untouched: `scheduleKitVoice` (audio.ts)
     hands the sampler `{note: fretted midi, velocity: roles-mapped}` at the
     same strum slot, the gate holds the one-sound guard (silent from t=0,
@@ -802,10 +826,14 @@ box." The playback side is now a `ConvolverNode` fed by a real recorded IR:
     notes = fretted midis handed to the sampler, root/color velocities, fixed
     distinct pans (lows left), the kit's six gates silent from t=0, strum
     spread. The recorded-string bank became the second engine, not the target;
-    the stored body IR should be cleared. **Do:** open `/debug/audio-debug.html`
-    ("Guitar engine" row), pick smplr, strum once (loads) then again (plays the
-    kit), and ear-check smplr vs samples vs synth on chord + single strings.
-    The kit URL + gain/attack/velocity knobs live in `config.engine`.
+    the stored body IR should be cleared. **Ear-approved by the user on the
+    live site (Sep 2026):** after the parse fix the kit plays real steel-guitar
+    samples on every chord — `__audio.status()` reads `ready: true` and debug
+    events carry `kind: "kit"`. The same fix changed the LOCAL sound: `npm
+    start` now plays the kit too (previously the approved local sound was the
+    recorded-sample bank). To A/B, use the "Guitar engine" row in
+    `/debug/audio-debug.html` (smplr vs samples vs synth on chord + single
+    strings). The kit URL + gain/attack/velocity knobs live in `config.engine`.
 - **Attack/transient redesign.** Slices 1–2 landed — see progress 14 and 18:
   each string's scrape carries its own brightness (`pickBright`) and length
   (`pickDecayMs`), and the onset now "blooms" (bright + touch louder) then
