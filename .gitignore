@@ -6,3 +6,5 @@ _site/
 Thumbs.db
 # Per-session audio comparison stats saved by the debug harness
 debug/comparisons.json
+# Session transcripts exported by the assistant
+session-*.md
