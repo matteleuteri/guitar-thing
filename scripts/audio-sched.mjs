@@ -34,6 +34,46 @@ class Param {
     this.events.push({ type: "ramp", value, time });
     return this;
   }
+  /**
+   * The spec's cancel points: `cancelScheduledValues(t)` drops every event at
+   * or after `t`, and `cancelAndHoldAtTime(t)` drops them but re-anchors the
+   * value the param had reached. Faithful enough to replay the curve in
+   * `valueAt()` — `audio-sched.mjs` asserts real note ENVELOPES with it, which
+   * is the only way to catch a gate that is cut or never opens.
+   */
+  cancelScheduledValues(time = 0) {
+    this.events = this.events.filter((e) => e.time < time);
+    return this;
+  }
+  cancelAndHoldAtTime(time) {
+    const held = this.valueAt(time);
+    this.events = this.events.filter((e) => e.time < time);
+    this.events.push({ type: "set", value: held, time });
+    return this;
+  }
+  /** Replay the automation at `t`, per the spec: the value comes from the last
+   *  event at or before `t` — but a ramp scheduled LATER still governs `t` if
+   *  `t` falls inside its span, and it interpolates from the previous event's
+   *  value at the previous event's time. */
+  valueAt(t) {
+    const sorted = this.events.map((e, i) => ({ ...e, i })).sort((a, b) => a.time - b.time || a.i - b.i);
+    let k = -1;
+    for (let i = 0; i < sorted.length; i++) {
+      if (sorted[i].time <= t) k = i;
+      else break;
+    }
+    if (k < 0) return this.value;
+    // A ramp that ENDS after `t` but started before it is the governing event.
+    if (k + 1 < sorted.length && sorted[k + 1].type === "ramp") k += 1;
+    const e = sorted[k];
+    if (e.type === "set") return e.value;
+    const prev = sorted[k - 1];
+    const from = prev ? prev.value : this.value;
+    const prevT = prev ? prev.time : 0;
+    const span = e.time - prevT;
+    const kk = span <= 0 ? 1 : Math.min(1, Math.max(0, (t - prevT) / span));
+    return from * Math.pow(e.value / Math.max(from, 1e-12), kk);
+  }
 }
 
 class Node {
@@ -412,6 +452,107 @@ check(kgatedFromZero === kgates.length, `every kit gate is silent from t=0 (${kg
 const kstarts = kevs.map((e) => e.time).sort((a, b) => a - b);
 const kspan = kstarts[kstarts.length - 1] - kstarts[0];
 check(kspan > 0.4, `kit voices are strummed over time (span ${(kspan * 1000).toFixed(0)}ms > 400ms)`);
+
+// ---------------------------------------------------------------------------
+// A released note must actually RING, then fade. This is the "each beat is
+// short and abrupt, the notes don't ring out together" bug, and it was
+// invisible to the checks above because they read automation CALLS, not the
+// curve they produce. `release()` used to `cancelAndHoldAtTime(at + attack)` —
+// but the note's own attack ramp ENDS at exactly that time, so the spec counts
+// it as an event there, deletes it, and holds the pre-attack silence. The gate
+// then went 0.0001 -> 0.0001 -> down: a released note never opened at all, and
+// an unreleased re-strike inherited the previous note's note-off, which cut it
+// short mid-ring. Both are envelope facts, so assert the envelope.
+{
+  const REACT = 0.02; // the gate's own attack, engine.attackMs 6ms
+  const kitGateList = gains.slice(gainsBeforeKit).filter((g) => g.gain.events.some((e) => e.type === "ramp"));
+  for (const g of kitGateList) g.gain.events.length = 0;
+  const RELEASE = 400;
+  const WHEN = 1.0;
+  playVoicing([0, 3, 2, 0, 1, 0], TUNING, { when: WHEN, strumMs: 0, releaseMs: RELEASE });
+  await new Promise((r) => setTimeout(r, 30));
+
+  /** Max gate level over a window, and the level `after` ms later. */
+  const curve = (g, from, after) => {
+    let peak = 0;
+    for (let t = from; t <= from + 0.05; t += 0.001) peak = Math.max(peak, g.gain.valueAt(t));
+    return { peak, after: g.gain.valueAt(from + after) };
+  };
+  let opened = 0;
+  let faded = 0;
+  for (const g of kitGateList) {
+    const attackEnd = g.gain.events.find((e) => e.type === "ramp" && e.value > 0.005)?.time;
+    if (attackEnd === undefined) continue;
+    const { peak, after } = curve(g, attackEnd, (RELEASE / 1000) * 0.75);
+    if (peak > 0.005) opened++;
+    if (peak > 0.005 && after <= peak * 0.01) faded++;
+  }
+  check(opened === kitGateList.length, `a released note OPENS (${opened}/${kitGateList.length} gates reached their peak)`);
+  check(faded === kitGateList.length, `a released note then fades out (${faded}/${kitGateList.length} gates fell 40dB after the release)`);
+  // The release is a fade from the peak, never a step to silence: mid-fade the
+  // gate must still be well above the floor or the note would click off.
+  const mid = kitGateList
+    .map((g) => {
+      const t = g.gain.events.find((e) => e.type === "ramp" && e.value > 0.005)?.time;
+      return t === undefined ? null : g.gain.valueAt(t + RELEASE / 2000);
+    })
+    .filter((v) => v !== null);
+  check(mid.length > 0 && mid.every((v) => v > 0.002 && v < 1), `the release is a fade, not a step (mid-fade ${mid.map((v) => v.toExponential(1)).join(" ") || "none"})`);
+}
+
+// Re-striking a string must not inherit the previous note's note-off: the old
+// fade is still scheduled past the new hit and used to pull the new note down
+// mid-ring. Strike one string twice, 100ms apart, releasing only the FIRST, and
+// the second must still be ringing 450ms in. The gate is whichever one the
+// sampler wrote to, so this goes through the real `play`/`release` path.
+{
+  const playFrettedNote = audio.playFrettedNote;
+  kitStarts.length = 0;
+  playFrettedNote(2, 3, TUNING, { when: 4.0, releaseMs: 400 });
+  await new Promise((r) => setTimeout(r, 30));
+  const gate = kitStarts.at(-1)?.dest;
+  check(!!gate, "the re-strike test found the string's gate");
+  kitStarts.length = 0;
+  playFrettedNote(2, 3, TUNING, { when: 4.1, releaseMs: 0 });
+  await new Promise((r) => setTimeout(r, 30));
+  const attacks = gate.gain.events.filter((e) => e.type === "ramp" && e.value > 0.005);
+  const second = attacks.at(-1);
+  const peak = second ? gate.gain.valueAt(second.time) : 0;
+  const later = second ? gate.gain.valueAt(second.time + 0.45) : 0;
+  check(kitStarts.length === 1 && kitStarts[0].time > 4, `the re-strike reached the sampler (${kitStarts.length} starts)`);
+  check(peak > 0.005, `the re-struck note opens (peak ${peak.toExponential(2)})`);
+  check(
+    later > peak * 0.5,
+    `a re-strike is not cut by the previous note's release (450ms in: ${(20 * Math.log10(later / Math.max(peak, 1e-9))).toFixed(1)}dB vs peak)`,
+  );
+}
+
+// A single fretboard dot (the clickable note in the positions grid) is a real
+// note on a real string, so it must pick its engine the same way a chord does.
+// It used to go through `playNotes`, which hands straight to the synthesized
+// worklet — every dot on the main page kept the pre-kit sound while the chords
+// moved to the samples.
+const { playFrettedNote } = audio;
+kitStarts.length = 0;
+const dotEventStart = getAudioDebugEvents().length;
+playFrettedNote(2, 3, TUNING); // D string, fret 3 → F3 (midi 53)
+await new Promise((r) => setTimeout(r, 30));
+const dotEvs = getAudioDebugEvents().slice(dotEventStart);
+check(dotEvs.length === 1, `one fretboard dot schedules one voice (got ${dotEvs.length})`);
+check(dotEvs[0]?.kind === "kit", `a fretboard dot routes to the smplr kit (got "${dotEvs[0]?.kind}")`);
+check(kitStarts.length === 1 && kitStarts[0]?.note === 53, `the sampler was handed the dot's note (${kitStarts.map((s) => s.note).join(",") || "none"})`);
+// It must not smear: one string, no strum, so it starts right at the click.
+const dotStart = dotEvs[0].time;
+const dotNow = 0; // the stub clock is frozen, so any spread shows up as offset from NOTE_START
+check(
+  Math.abs(dotStart - dotNow) < 0.06,
+  `a dot sounds immediately, not spread by a strum (offset ${((dotStart - dotNow) * 1000).toFixed(0)}ms)`,
+);
+// The dot keeps its string's fixed stereo seat, not a count-relative pan.
+check(
+  Math.sign(dotEvs[0].pan) === Math.sign((2 / 5) * 2 - 1),
+  `a dot sits in its own string's stereo seat (pan ${dotEvs[0].pan.toFixed(2)})`,
+);
 
 // Kit switch (progress 22): steel-string → classical nylon rebuilds the engine
 // and decodes the OTHER kit (the default is steel, so the first decode above

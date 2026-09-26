@@ -184,7 +184,7 @@ tempo 96        # directives: tempo|bpm, bar, step, strum, release
 bar 4           # beats per bar (default 4)
 step 0.5        # beats per tab character column (default 0.5 = eighths)
 strum 55        # default strum width ms for multi-note events (0 = blocked)
-release 400     # note length ms; 0/absent = let ring
+release 1200    # damp each note 1200ms in; 0/absent = let ring (default)
 C Am F G        # a chord line: one chord per bar, spaced or `C|Am|F|G`
 e|5---5---7---7---8---8---7---5---|
 B|----------------3---5---5---3---|
@@ -193,13 +193,29 @@ G|--------------------------------|
 
 Tab rules: lanes are `e`, `B`, `G`, `D`, `A`, `E` (index 0 = **low E**, the
 `STRING_LETTERS = "eBGDAE"` order reversed for reading); a character column is
-one step. `-`/`.`/`_` = rest, `x` = mute, 1–2 digit frets (a 2-digit fret
-occupies two character positions), and `'`/`?`/`b`/`h`/`p`/`~`/`*` are accepted
-as articulation marks but **currently ignored** — don't treat them as a feature.
+one step. **Every character is one column, spaces included** — `-`/`.`/`_`/space
+= rest, `x` = mute, 1–2 digit frets (a 2-digit fret occupies two character
+positions), and `'`/`?`/`b`/`h`/`p`/`~`/`*` are accepted as articulation marks
+but **currently ignored** — don't treat them as a feature. A space used to be
+*dropped* instead of holding its column, which slid every following note one
+column left of where it was printed and made two space-separated lanes of equal
+length fail the width check; `LANE_LINE` now takes the body raw and `laneCells`
+pushes a rest for it, and the length error tells the user to pad. A lane that
+opens `e|` without closing its pipe is reported as such instead of falling
+through to the chord stream and dying as `Unknown chord "e"`.
 Chord voicings reuse `planGuitarSong`'s DP so the hand moves as little as
 possible; tab events are the explicit-string escape hatch. Note names are
 resolved to *frequencies* via `tuning[stringIndex] + fret`; there is no raw
 Hz/MIDI input yet.
+
+**The notation box is live, and Play is honest.** `riffText` has an `input`
+listener → `refreshRiff()` (debounced `RIFF_EDIT_MS` 300 ms: a re-voice of the
+chord stream per keystroke is wasted work and error text that updates per
+character fights the typing), and `startRiff()` **re-plans before playing** so a
+click can never play a stale plan and an unparseable box reports why instead of
+being a silent no-op. Editing stops playback, like every other notation/settings
+change — otherwise the redrawn timeline and the ringing loop would silently
+disagree about what is playing.
 
 **Timing.** `src/transport.ts`'s `RiffTransport` is a lookahead scheduler
 (25 ms tick, 0.3 s horizon) that books every note on `AudioContext.currentTime`
@@ -218,6 +234,32 @@ strum jitter and the per-voice `micro.jitterMs` are suppressed when the width
 is 0 — otherwise a "blocked" chord smears a few ms and a riff trainer that lies
 about simultaneity is useless. And `releaseMs` is **kit-only** today: it ramps
 the smplr per-string gate down, while the sample/synth fallbacks still ring out.
+
+**The kit gate's note-off must never cancel the note's own attack** (this was
+the "each beat is short and abrupt, the notes don't ring out together" bug).
+The gate is a *persistent* per-string `GainNode`, so a note-off is scheduled
+onto automation that a later note shares. `release()` used to
+`cancelAndHoldAtTime(at + attack)` — but the attack ramp **ends** exactly at
+`at + attack`, and the spec counts a ramp by its endpoint, so the hold deleted
+the attack and re-anchored the pre-attack silence: the gate went
+`0.0001 → 0.0001 → down` and the note never opened at all. With `release 400`
+in the shipped notation, most notes of the riff were **silent** (measured: peak
+`0.0001`, −80 dB) and a few were a 400 ms blip. Two rules came out of it:
+`release()` now *appends* the fade (a ramp interpolates from the previous
+event's value, which is the attack reaching its peak — so the shape is "attack,
+hold, fade"), and `play()` calls `cancelScheduledValues(time)` first, because a
+re-strike otherwise inherited the previous note's still-scheduled note-off and
+got cut mid-ring (measured: −69.6 dB, 450 ms in). `scripts/audio-sched.mjs`
+now models the automation timeline (`valueAt`) and asserts the *envelope* — a
+released note reaches its peak and then falls 40 dB, the fade is a fade and not
+a step, and a re-strike is still ringing 450 ms later. All four fail on the old
+code. The lesson generalises: **read automation CALLS and you cannot see this
+class of bug — replay the curve.** The shipped notation also dropped `release`
+entirely (let ring is the parser default and what a real guitar does); 400 ms
+was staccato even once it was audible. Known characteristic, not fixed: a
+re-strike steps the shared gate to silence in one sample, which can click if the
+previous note is still loud — a click-free damp needs a per-voice gain, and the
+one-gate-per-string chain is what enforces the one-sound rule.
 
 **The notation we ship is parse-tested.** `scripts/smoke.mjs` reads the Riff
 textarea out of `index.html` and every fenced tab example out of `README.md` and
@@ -385,9 +427,17 @@ TypeScript is the only devDependency. No frameworks.
   (`margin: 0 auto`) so keys don't stretch wide. Black keys render as children of the
   white-key row so their `left: (leftCount / whiteCount * 100)%` stays exact.
 - Click-to-play: every keyboard key (`playNotes([midi], true)`) and every
-  fretboard position dot (`playNotes([tuning[s] + f])`) plays its own note on
-  click; voicing mini-keyboards are key-playable too, alongside their ▶
-  whole-voicing button.
+  fretboard position dot (`playFrettedNote(stringIndex, fret, tuning)`) plays
+  its own note on click; voicing mini-keyboards are key-playable too, alongside
+  their ▶ whole-voicing button. **A dot is a real note on a real string**, so
+  it goes through `playFrettedNote` → `playVoicing(…, { strumMs: 0 })` and
+  therefore picks its engine (kit → samples → synth) and its string's fixed
+  stereo seat exactly like a chord. It used to call `playNotes([midi])`, which
+  hands straight to the synthesized worklet — the positions grid kept the
+  pre-kit sound while the chords moved to the samples. `playNotes` is now
+  **piano-only** (keys, song-mode piano); don't route guitar notes through it,
+  it bypasses `scheduleGuitarVoicing` and with it the whole engine chain.
+  `audio-sched.mjs` asserts a dot is `kind: "kit"` with the right note/pan.
 
 ## Audio
 

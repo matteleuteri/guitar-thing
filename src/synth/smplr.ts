@@ -315,9 +315,15 @@ export class SmplrGuitarEngine {
     // rapid repeated chords cut the previous note (fine: chords are
     // one-handed, and `stopAudio` silences everything anyway).
     const gate = this.gates[stringIndex];
-    gate.gain.setValueAtTime(0.0001, 0);
-    gate.gain.setValueAtTime(0.0001, time);
-    gate.gain.exponentialRampToValueAtTime(
+    const param = gate.gain;
+    // A re-struck string must not inherit the PREVIOUS note's note-off. That
+    // fade is still scheduled past `time` and would pull this note back down
+    // mid-ring, so drop everything at or after this slot before arming (the
+    // t=0 guard below is re-added, and the previous note is re-struck anyway).
+    param.cancelScheduledValues(time);
+    param.setValueAtTime(0.0001, 0);
+    param.setValueAtTime(0.0001, time);
+    param.exponentialRampToValueAtTime(
       Math.max(0.02, guitarPeak({ peak: params.peak, engineGain: this.config.engine.gain })),
       time + Math.max(0.002, this.config.engine.attackMs / 1000),
     );
@@ -329,21 +335,21 @@ export class SmplrGuitarEngine {
   /**
    * Damp one string `ms` after `at` by ramping its gate down — the note-off a
    * riff needs (a kit note rings for seconds, so a run of notes piles into mush
-   * without it). The gate is ours and its automation is time-ordered, so a
-   * later `play` on the same string simply re-arms it after this release.
+   * without it). The fade is APPENDED to the note's own attack ramp rather than
+   * cancelling and re-holding it, because the attack ramp *ends* exactly where
+   * a hold would start: `cancelAndHoldAtTime(at + attack)` counts that ramp as
+   * an event at `at + attack`, deletes it, and holds the pre-attack silence — so
+   * the note never opens at all and a released note is a click, not a chord.
    */
   release(stringIndex: number, at: number, ms: number): void {
     const gate = this.gates[stringIndex];
     if (!gate || ms <= 0) return;
     const start = at + Math.max(0.002, this.config.engine.attackMs / 1000);
     const end = start + ms / 1000;
-    // `cancelAndHoldAtTime` keeps the level the note reached (so a release
-    // part-way through the attack doesn't click); fall back to the current
-    // value where it is unavailable.
-    const param = gate.gain;
-    if (typeof param.cancelAndHoldAtTime === "function") param.cancelAndHoldAtTime(start);
-    else param.setValueAtTime(param.value, start);
-    param.exponentialRampToValueAtTime(0.0001, end);
+    // A ramp interpolates from the value at the previous automation event, and
+    // that event is the attack ramp reaching its peak — so the shape is
+    // "attack, hold, fade" with no click and no level jump.
+    gate.gain.exponentialRampToValueAtTime(0.0001, end);
   }
 
   /** Silence every string's instrument (used by `stopAudio`). */

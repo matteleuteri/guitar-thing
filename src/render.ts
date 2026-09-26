@@ -1,4 +1,4 @@
-import { playNotes, playVoicing } from "./audio.js";
+import { playFrettedNote, playNotes, playVoicing } from "./audio.js";
 import { findPositions, type Fingering } from "./fretboard.js";
 import type { RiffEvent } from "./riff.js";
 import { midiName, SEMITONES } from "./theory.js";
@@ -50,7 +50,7 @@ export function renderPositions(
         dot.style.setProperty("--c", colorFor(pitchClass));
         const midi = tuning[stringIndex] + fret;
         dot.title = `${nameOf(pitchClass)} · ${midiName(midi)} · string ${stringIndex + 1} fret ${fret}`;
-        dot.addEventListener("click", () => playNotes([midi]));
+        dot.addEventListener("click", () => playFrettedNote(stringIndex, fret, tuning));
         cell.appendChild(dot);
       }
       row.appendChild(cell);

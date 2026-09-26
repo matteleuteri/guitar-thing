@@ -64,7 +64,12 @@ export interface RiffOptions {
 }
 
 const STRING_LETTERS = "eBGDAE";
-const LANE_LINE = /^\s*([eBGDAE])\s*\|\s*(.*?)\s*\|\s*$/;
+// The body is taken RAW between the pipes: a leading space is a rest on column
+// 0, not decoration, and trimming it would slide every note left. Nothing but
+// a `|` may end the body, so two lanes can't bleed into one another.
+const LANE_LINE = /^\s*([eBGDAE])\s*\|([^|]*)\|\s*$/;
+/** A lane that opens with a string letter + `|` but never closes its pipe. */
+const UNCLOSED_LANE = /^\s*[eBGDAE]\s*\|/;
 const MUTE_CHARS = new Set(["x", "X"]);
 const REST_CHARS = new Set(["-", ".", "_"]);
 /** Suffix markers a player writes after a fret (bend, pull-off, let-ring). */
@@ -77,22 +82,26 @@ function clamp(value: number, lo: number, hi: number): number {
 
 /**
  * Scan one tab lane's body into cells. This is a CHARACTER scanner, not a
- * whitespace splitter, so both the compact form players actually write
- * (`e|--5-5-10--|`) and the spaced form (`e|-- 5 5 10 --|`) parse identically.
+ * whitespace splitter, so every character is one column and the lanes line up
+ * the way they look — which is what printed tab means and what a player
+ * actually types. A two-digit fret occupies its own two character columns (its
+ * second one empty) so a note in another lane under the `0` still lines up.
+ * `-`/`.`/`_`/space are rests that hold their column, `x` is a mute, and
+ * `'/?/b/h/p` after a fret are accepted and ignored for now.
  *
- * Columns are CHARACTER positions, not note positions, so lanes line up the way
- * they look — a two-digit fret occupies its own two character columns (its
- * second one empty), exactly as in printed tab, and a note in another lane
- * under the `0` still lines up. `-`/`.`/`_` are rests, `x` is a mute, and
- * `'`/`?`/`b`/`h`/`p` after a fret are accepted and ignored for now.
+ * Spaces were previously *dropped* rather than counted, which silently moved
+ * every note after the first one column left of where it was printed and made
+ * a pair of space-separated lanes fail the equal-length check.
  */
 function laneCells(body: string, lineNo: number): (number | "x" | null)[] {
   const cells: (number | "x" | null)[] = [];
   const chars = [...body];
   for (let i = 0; i < chars.length; i++) {
     const ch = chars[i];
-    if (ch === " " || ch === "\t") continue;
-    if (REST_CHARS.has(ch)) {
+    // A space is a rest that HOLDS ITS COLUMN, like a dash. Dropping it (the
+    // old behavior) moved every following note one column left of where the
+    // player wrote it, and broke the equal-length check between lanes.
+    if (ch === " " || ch === "\t" || REST_CHARS.has(ch)) {
       cells.push(null);
       continue;
     }
@@ -133,9 +142,12 @@ function laneCells(body: string, lineNo: number): (number | "x" | null)[] {
  *   B|------3--5--3--|
  *
  * A line shaped like `string|...|` is a tab lane; any other non-directive line
- * is the chord stream. Chords are voiced by the same DP `planGuitarSong` uses,
- * so a progression keeps one hand shape across the whole stream. The loop
- * window is a transport setting (the two "Loop ... bar" inputs), not notation.
+ * is the chord stream. In a lane EVERY character is one column — frets, `-`,
+ * `.`, `_`, `x` and plain spaces alike — so lanes line up the way they look
+ * and must all be the same character width. Chords are voiced by the same DP
+ * `planGuitarSong` uses, so a progression keeps one hand shape across the whole
+ * stream. The loop window is a transport setting (the two "Loop ... bar"
+ * inputs), not notation.
  */
 export function parseRiff(text: string, options: RiffOptions): Riff {
   const warnings: string[] = [];
@@ -187,6 +199,11 @@ export function parseRiff(text: string, options: RiffOptions): Riff {
           throw new Error(`Line ${lineNo}: two lanes for string ${lane[1]}; use one lane per string.`);
         }
         lanes.set(stringIndex, laneCells(lane[2], lineNo));
+      } else if (UNCLOSED_LANE.test(line)) {
+        // `e|5---5---` with no closing pipe used to fall through to the chord
+        // stream and die as `Unknown chord "e"`, which points at the wrong
+        // line of the wrong thing entirely.
+        throw new Error(`Line ${lineNo}: this tab lane is missing its closing "|".`);
       } else {
         // A token that *starts* with a comment marker opens a trailing comment,
         // so `C Am F G # the accompaniment` works — but `F#m7` and `Bb7` are
@@ -204,7 +221,11 @@ export function parseRiff(text: string, options: RiffOptions): Riff {
   const widths = new Set([...lanes.values()].map((cells) => cells.length));
   if (widths.size > 1) {
     const listed = [...widths].sort((a, b) => a - b).join(", ");
-    throw new Error(`Tab lanes have different lengths (${listed} columns).`);
+    // The counts are CHARACTERS, so the fix is to pad the short lanes with
+    // dashes or spaces to the same width — say so, it is the commonest error.
+    throw new Error(
+      `Tab lanes have different lengths (${listed} columns). Every character counts as one column, so pad the short lanes with "-" or spaces to the same width.`,
+    );
   }
   const columns = widths.size === 1 ? [...widths][0] : 0;
   if (columns === 0 && chordTokens.length === 0) {

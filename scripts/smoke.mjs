@@ -288,10 +288,61 @@ const riffOpts = { tuning: STANDARD, maxFrets: 15, span: 5, cap: 200 };
 
 // --- step size drives beat placement ---
 {
-  const a = parseRiff("e|0 0 0 0|", riffOpts);
-  const b = parseRiff("e|0 0 0 0|\nstep 1", riffOpts);
+  // A fret digit is a whole column, so consecutive notes live in two lanes:
+  // e on the even columns, B on the odd ones (columns 0..7 = beats 0..3.5).
+  const notes = "e|0-0-0-0-|\nB|-3-3-3-3|";
+  const a = parseRiff(notes, riffOpts);
+  const b = parseRiff(`${notes}\nstep 1`, riffOpts);
+  check(a.events.length === 8, `one event per column across two lanes (got ${a.events.length})`);
   check(a.events[3].beat === 1.5, `default step 0.5 -> beat 1.5 (got ${a.events[3].beat})`);
   check(b.events[3].beat === 3, `step 1 -> beat 3 (got ${b.events[3].beat})`);
+}
+
+// --- every CHARACTER is a column, spaces included ---
+// A space used to be dropped instead of holding its column, which slid every
+// following note one column left of where it was printed and made a pair of
+// space-separated lanes fail the equal-length check outright. A space is now
+// exactly a dash: a rest that holds its column, as in printed tab.
+{
+  const spaced = parseRiff("e|-- 5 5 7 -|", riffOpts);
+  const dashed = parseRiff("e|---5-5-7-|", riffOpts);
+  check(
+    spaced.events.map((e) => e.beat).join() === dashed.events.map((e) => e.beat).join(),
+    `a space is a dash: same character column -> same beat (${spaced.events.map((e) => e.beat).join()})`,
+  );
+  check(
+    spaced.events.map((e) => e.beat).join() === "1.5,2.5,3.5",
+    `a spaced lane plays on the column it is written at (${spaced.events.map((e) => e.beat).join()})`,
+  );
+  check(spaced.events.length === 3, `spaced lane: 3 notes (got ${spaced.events.length})`);
+  // Two space-separated lanes of the same CHARACTER width line up and play.
+  const pair = parseRiff("e|-- 5 5 7 -|\nB|-- 3 5 - -|", riffOpts);
+  check(pair.events.length === 3, `spaced lanes: 3 stacked events (got ${pair.events.length})`);
+  check(
+    pair.events[0].notes.length === 2 && pair.events[0].notes[0].fret === 3,
+    "spaced lanes: a B-lane note stacks under the e-lane note in the same column",
+  );
+  // A LEADING space is column 0, not decoration.
+  const indented = parseRiff("e| --5--5--|\nB| --3--5--|", riffOpts);
+  check(indented.events[0].beat === 1.5, `a leading space is a rest column (beat ${indented.events[0].beat})`);
+  // ...and a width mismatch is still the error it was, now with the fix in it.
+  let msg = "";
+  try {
+    parseRiff("e|-- 5 5 7 -|\nB|-- 3 5 -|", riffOpts);
+  } catch (err) {
+    msg = err.message;
+  }
+  check(/different lengths \(8, 10 columns\)/.test(msg), `spaced lanes of different widths throw (${msg || "no error!"})`);
+  check(/pad the short lanes/.test(msg), "the lane-length error says how to fix it");
+  // A lane with no closing pipe used to fall through to the chord stream and
+  // die as `Unknown chord "e"`, which points at the wrong thing entirely.
+  let unclosed = "";
+  try {
+    parseRiff("e|--5-5-7-", riffOpts);
+  } catch (err) {
+    unclosed = err.message;
+  }
+  check(/closing "\|"/.test(unclosed), `an unclosed lane says so (${unclosed || "no error!"})`);
 }
 
 // --- directives ---
@@ -343,9 +394,9 @@ throws(() => parseRiff("# only a comment", riffOpts), "empty riff throws");
 
 // --- transport: lookahead scheduling on a fake clock ---
 {
-  // 4 single notes on the open strings, 120bpm => 0.5s per half-beat step,
-  // a 2-bar window = 1.0s per pass, 4 events per pass.
-  const r = parseRiff("tempo 120\nbar 4\ne|0 0 0 0|", riffOpts);
+  // A note on every column 0..7 (two lanes), 120bpm => 0.25s per column, so a
+  // 2-beat window is 1.0s per pass with 4 events in it.
+  const r = parseRiff("tempo 120\nbar 4\ne|0-0-0-0-|\nB|-3-3-3-3|", riffOpts);
   let clock = 0;
   const fired = [];
   const t = new RiffTransport(
@@ -381,22 +432,23 @@ throws(() => parseRiff("# only a comment", riffOpts), "empty riff throws");
   check(due.every((f, i) => i === 0 || Math.abs((f.when - due[i - 1].when) - 0.25) < 1e-6),
     "transport: the spacing stays exact across every loop wrap (no drift)");
   // The repeat period is the window length, derived from the scheduled end
-  // rather than the timer — the whole point of anchoring.
+  // rather than the timer — the whole point of anchoring. The (0,2] window
+  // holds 4 of the 8 events, so the same event one pass later is 4 along.
   const period = fired[4].when - fired[0].when;
   check(Math.abs(period - 1.0) < 1e-6, `transport: the 2-beat window repeats every 1.0s (got ${period})`);
 
-  // A wider window repeats more slowly: 4 beats at 120bpm is a 2s pass, and
-  // this riff has no notes in its second bar, so they cluster per pass.
+  // A wider window holds the whole riff: 4 beats at 120bpm is a 2s pass with
+  // all 8 events in it, so the same event one pass later is 8 along.
   t.stop();
   t.setLoop(0, 4);
   clock = 0;
   fired.length = 0;
   t.play(0);
   for (let i = 0; i <= 300; i++) { clock = i * 0.02; t.advance(clock); }
-  check(Math.abs((fired[4].when - fired[0].when) - 2.0) < 1e-6,
-    `transport: a 4-beat window repeats every 2.0s (got ${fired[4].when - fired[0].when})`);
-  check(fired.filter((f) => f.when <= 4 + 1e-9).length === 9,
-    `transport: 4s of a 2s loop plays 9 notes (got ${fired.filter((f) => f.when <= 4 + 1e-9).length})`);
+  check(Math.abs((fired[8].when - fired[0].when) - 2.0) < 1e-6,
+    `transport: a 4-beat window repeats every 2.0s (got ${fired[8].when - fired[0].when})`);
+  check(fired.filter((f) => f.when <= 4 + 1e-9).length === 17,
+    `transport: 4s of a 2s loop plays 17 notes (got ${fired.filter((f) => f.when <= 4 + 1e-9).length})`);
 
   t.stop();
   check(t.playing === false, "transport: stop() halts the scheduler");
@@ -533,6 +585,30 @@ throws(() => parseRiff("# only a comment", riffOpts), "empty riff throws");
       }
     }
   }
+}
+
+// ---- The app must act on what is in the notation box. ----
+// The parser is covered above; this is a source check on the wiring, because
+// the failure it guards is a SILENT one. The box used to have no `input`
+// listener at all, so an edit only took effect when "Find" was pressed, and Play
+// then played the previous plan; with `riffPlan` null, `startRiff` returned
+// without a sound or a message. Neither shows up in an audio assertion, so
+// assert the wiring exists.
+{
+  const main = await readFile(new URL("../src/main.ts", import.meta.url), "utf8");
+  check(
+    /riffText\.addEventListener\("input"/.test(main),
+    "the riff notation box re-plans as you type (input listener present)",
+  );
+  check(
+    /RIFF_EDIT_MS/.test(main),
+    "the re-plan is debounced (a re-voice per keystroke is wasted work)",
+  );
+  const start = main.slice(main.indexOf("function startRiff"));
+  check(
+    /refreshRiff\(\)/.test(start.slice(0, start.indexOf("primeAudio"))),
+    "Play re-plans before playing, so it can never play a stale plan",
+  );
 }
 
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURES`);

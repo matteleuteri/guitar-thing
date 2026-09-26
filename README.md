@@ -79,14 +79,15 @@ mini keyboards with the pressed keys filled in.
 
 Switch **Mode** to *Riff* to type a chord stream and/or a tab lane and hear it
 played back on a loop, with a speed slider, loop bounds and a per-string
-timeline you can click to audition single events.
+timeline you can click to audition single events. The timeline re-plans as you
+type, and **Play ▶** always plays what is in the box.
 
 ```
 tempo 96        # tempo|bpm, bar, step, strum, release (directives, optional)
 bar 4           # beats per bar
 step 0.5        # beats per tab character column (0.5 = eighths)
 strum 55        # strum width in ms for multi-note events (0 = all at once)
-release 400     # note length in ms (0 or absent = let it ring)
+release 1200    # damp each note 1.2s in (omit = let it ring, the default)
 C Am F G        # chord line: one chord per bar (or `C|Am|F|G`)
 e|5---5---7---7---8---8---7---5---|
 B|----------------3---5---5---3---|
@@ -98,10 +99,11 @@ together, so the chords are the accompaniment and the tab is the melody. Chord
 voicings are chosen automatically (the hand moves as little as possible), so
 the tab lane is the escape hatch when you want exact strings.
 
-Tab lanes are `e B G D A E` (high `e` first, as you read them); in each column
-`-` `.` `_` is a rest, `x` mutes, and a number is a fret (two digits occupy two
-columns). Frequencies come from the current tuning, so this works with a custom
-tuning too.
+Tab lanes are `e B G D A E` (high `e` first, as you read them); **every character
+is one column**, so in each column `-` `.` `_` or a plain space is a rest, `x`
+mutes, and a number is a fret (two digits occupy two columns). All lanes must be
+the same character width, so pad the short ones with dashes or spaces.
+Frequencies come from the current tuning, so this works with a custom tuning too.
 
 ## Note selection
 

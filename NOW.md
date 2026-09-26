@@ -99,6 +99,16 @@ bars, and does the playhead move smoothly? Nobody has seen it render.
   nothing currently expresses a held or tied note.
 - Only a few note kinds work. No bends/hammer-ons (tab accepts the marks and
   ignores them), no per-event strum override, no strum direction.
+- Nothing has been **heard** since. The first ear check failed: *"each beat is
+  short and abrupt, the notes/chords don't all ring out together."* The cause was
+  a real bug, not taste — `release()` in `src/synth/smplr.ts` called
+  `cancelAndHoldAtTime(at + attack)`, and since the note's attack ramp *ends*
+  exactly there, the spec deleted the attack and re-anchored the pre-attack
+  silence. With the shipped `release 400`, most notes were **silent** (measured
+  peak −80 dB) and the rest were 400 ms blips. Fixed (append the fade, and cancel
+  a re-strike's stale note-off), regression-tested as an *envelope* in
+  `scripts/audio-sched.mjs`, and the shipped notation now omits `release` so
+  notes let ring. **The ear check still has to be redone.**
 
 ---
 

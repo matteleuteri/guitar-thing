@@ -25,6 +25,9 @@ import {
 
 const DEFAULT_PCS = new Set([0, 4, 7]); // C E G
 
+/** Idle time before an edit to the riff notation is re-planned. */
+const RIFF_EDIT_MS = 300;
+
 /** Narrow the per-chord union by which plan kind produced it. */
 function isPianoChord(chord: GuitarSongChord | PianoSongChord): chord is PianoSongChord {
   return "voicing" in chord;
@@ -330,7 +333,11 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function startRiff() {
-    const riff = riffPlan;
+    // Play what is on screen RIGHT NOW: re-plan from the textarea, so a click
+    // can never play a stale plan (the notation used to be parsed only when
+    // "Find" was pressed, so an edit was silently ignored) and an unparseable
+    // box reports why instead of being a silent no-op.
+    const riff = refreshRiff();
     if (!riff) return;
     // The transport reads `audioNow()`, so the context must exist AND be
     // running before it starts counting — otherwise currentTime sits at 0 and
@@ -503,6 +510,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function runRiff(params: Params) {
     chordsTitle.textContent = "Riff";
+    // Own the list: `runRiff` is also called straight from the notation editor,
+    // which doesn't go through `run()`.
+    chordList.replaceChildren();
 
     let riff: Riff;
     try {
@@ -517,7 +527,8 @@ document.addEventListener("DOMContentLoaded", () => {
       chordSummary.textContent = "";
       setError(e instanceof Error ? e.message : String(e));
       riffPlan = null;
-      return;
+      riffTimeline = null;
+      return null;
     }
 
     riffPlan = riff;
@@ -551,7 +562,43 @@ document.addEventListener("DOMContentLoaded", () => {
     chordList.appendChild(
       el("div", "muted riff-hint", "Click any note group to hear just that event. Chords are voiced for the smallest hand movement across the whole stream."),
     );
+    return riff;
   }
+
+  /**
+   * Re-plan the riff from the notation box: stop playback, re-read the params,
+   * re-render the timeline. Returns the plan, or `null` with the reason on
+   * screen. Used by the notation editor and by Play, so both always act on
+   * what the player is looking at.
+   */
+  function refreshRiff(): Riff | null {
+    stopRiff();
+    setError(null);
+    let params: Params;
+    try {
+      params = readParams();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      riffPlan = null;
+      chordList.replaceChildren();
+      return null;
+    }
+    return runRiff(params);
+  }
+
+  // Typing in the notation re-plans it (debounced: a re-voice of the chord
+  // stream per keystroke is wasted work, and error text that updates on every
+  // character fights the typing). Editing stops playback, like every other
+  // notation/settings change — otherwise the drawn timeline and the ringing
+  // loop would silently disagree about what is playing.
+  let riffEditTimer = 0;
+  riffText.addEventListener("input", () => {
+    if (riffEditTimer) clearTimeout(riffEditTimer);
+    riffEditTimer = window.setTimeout(() => {
+      riffEditTimer = 0;
+      if (modeSelect.value === "riff") refreshRiff();
+    }, RIFF_EDIT_MS);
+  });
 
   function run() {
     setError(null);

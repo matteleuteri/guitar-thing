@@ -862,6 +862,27 @@ export function playVoicing(
 }
 
 /**
+ * Pluck one fretted position (a single fretboard dot) exactly as a one-string
+ * voicing: the dot is a real note on a real string, so it must pick its engine
+ * the same way a chord does — kit, else recorded samples, else synth — and sit
+ * in that string's stereo seat. `playNotes` can't do this: it hands straight
+ * to the synthesized worklet, which left every dot on the pre-kit sound.
+ */
+export function playFrettedNote(
+  stringIndex: number,
+  fret: number,
+  tuning: number[],
+  options: PlayOptions = {},
+): void {
+  const frets: (number | null)[] = new Array(tuning.length).fill(null);
+  if (stringIndex < 0 || stringIndex >= tuning.length) return;
+  frets[stringIndex] = fret;
+  // No strum: one string has nothing to spread over, and a dot click should
+  // sound the instant it's clicked.
+  playVoicing(frets, tuning, { ...options, strumMs: 0 });
+}
+
+/**
  * Wait (bounded) while the smplr kit engine is built but not yet decoded, so a
  * play that arrives during the first-load decode rides the kit instead of the
  * fallback. Resolves immediately when there's no kit to wait on; the timeout
