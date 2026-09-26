@@ -5,10 +5,11 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/build-info.mjs",
     "start": "npm run build && node server.mjs",
     "test": "npm run build && node scripts/smoke.mjs && node scripts/audio-sched.mjs",
-    "debug": "npm run build && node server.mjs"
+    "debug": "npm run build && node server.mjs",
+    "here": "node scripts/here.mjs"
   },
   "devDependencies": {
     "typescript": "^5.5.0"

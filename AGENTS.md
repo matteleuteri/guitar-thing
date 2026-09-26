@@ -136,6 +136,9 @@ numbers are superseded in priority by the kit.
   Audio to assert the voice-graph strum/gating invariants). Always run before
   declaring a change done.
 - `node server.mjs` directly to serve without rebuilding.
+- `npm run here` — print the current branch/commit, whether `dist/` was built
+  from it, and whether anything is unpushed. Run this first when picking up
+  work on a different branch.
 - `npm run debug` — build, then serve so the audio harness at
   `/debug/audio-debug.html` works.
 
@@ -302,7 +305,15 @@ same pixel.
   (stubbed Web Audio): every voice must be silent from t=0 until its strum slot,
   the strum must spread over time, and each voice must have a distinct
   brightness/attack/role. This is the regression test for the "one sound" bug below.
-- `server.mjs` — zero-dep Node HTTP static file server (root = cwd).
+- `server.mjs` — zero-dep Node HTTP static file server (root = cwd), plus a
+  `/__git` route returning the live branch/commit/dirty state (never cached).
+- `scripts/build-info.mjs` — post-build step writing `dist/__build.json` with
+  the branch, commit, subject and timestamp the build came from. Best-effort
+  (the Pages deploy runs it too, where git may be shallow), so it never fails a
+  build. **Why it exists:** `dist/` is gitignored, so switching branches leaves
+  the *previous* branch's build being served and tested. The stamp is compared
+  against `/__git` so the ear-check page can shout "STALE BUILD" instead of
+  letting you judge the wrong code. `npm run here` does the same check in a terminal.
 
 Runtime dependencies: **`smplr`** (the sampled-guitar engine, progress 21) —
 the app's first runtime dependency; the self-hosted kit is a plain asset.

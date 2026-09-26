@@ -21,6 +21,10 @@
     th { color: #888; font-weight: 400; }
     .gate-ok { color: #7bd88f; }
     .gate-bad { color: #ff8a7a; }
+    .stamp { font-size: 11px; padding: 5px 9px; border-radius: 4px; border: 1px solid #333;
+             background: #0c0c0c; margin: 0 0 14px; display: inline-block; }
+    .stamp.ok { border-color: #2c5c3a; color: #7bd88f; }
+    .stamp.warn { border-color: #7a3030; color: #ff8a7a; font-weight: 600; }
     .case { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .case label { min-width: 190px; color: #bbb; }
   </style>
@@ -34,6 +38,8 @@
     <code>npm test</code>; they are here so your ears and the measurements can be compared.
     Only the judgements need you: does it sound like a guitar, and does it sound musical.
   </p>
+
+  <div id="stamp" class="stamp">checking which build this is…</div>
 
   <h2>0 · Engine gate (read this first, no ears needed)</h2>
   <div class="row">
@@ -124,6 +130,35 @@ G|--------------------------------|`;
 
     const riff = parseRiff(DEFAULT_TEXT, { tuning: TUNING, maxFrets: 24, span: 5 });
     let transport = null;
+
+    // ---- which build am I actually listening to? --------------------------
+    // dist/ is gitignored, so switching branches can leave the previous
+    // branch's build being served. Compare the commit baked into the build
+    // against the branch the server is actually serving, and shout if they
+    // differ -- otherwise every judgement below is about the wrong code.
+    (async () => {
+      const box = $("stamp");
+      let built = null;
+      let live = null;
+      try { built = await (await fetch("../dist/__build.json", { cache: "no-store" })).json(); } catch {}
+      try { live = await (await fetch("/__git", { cache: "no-store" })).json(); } catch {}
+      if (!built) {
+        box.className = "stamp warn";
+        box.textContent = "no build stamp found — run: npm start";
+        return;
+      }
+      const builtAt = new Date(built.builtAt).toLocaleTimeString();
+      if (!live) {
+        box.className = "stamp";
+        box.textContent = `testing build ${built.branch}@${built.commit} (built ${builtAt}) — live HEAD unavailable (opened as a file?)`;
+        return;
+      }
+      const stale = live.commit !== built.commit || live.branch !== built.branch;
+      box.className = stale ? "stamp warn" : "stamp ok";
+      box.textContent = stale
+        ? `STALE BUILD — this page is ${built.branch}@${built.commit} (built ${builtAt}) but the branch is now ${live.branch}@${live.commit}. Run: npm start`
+        : `testing ${live.branch}@${live.commit}${live.dirty ? " (uncommitted changes)" : ""} — built ${builtAt} — ${built.subject}`;
+    })();
 
     function stop() {
       if (transport) { transport.stop(); transport = null; }

@@ -406,6 +406,48 @@ throws(() => parseRiff("# only a comment", riffOpts), "empty riff throws");
   check(fired.length === before, "transport: advance() after stop() places nothing new");
 }
 
+// ---- The build stamp (which branch/commit is being served). ----
+// dist/ is gitignored, so a stale build is the default failure mode when
+// switching branches. npm test builds first, so the stamp must exist and be
+// well-formed here, or the ear-check page silently loses its staleness warning.
+{
+  let stamp = null;
+  let raw = "";
+  try {
+    raw = await readFile(new URL("../dist/__build.json", import.meta.url), "utf8");
+    stamp = JSON.parse(raw);
+  } catch (err) {
+    check(false, `dist/__build.json is written by the build (${err.message})`);
+  }
+  if (stamp) {
+    check(
+      typeof stamp.branch === "string" && stamp.branch !== "",
+      `the build stamp names a branch (${stamp.branch})`,
+    );
+    check(
+      typeof stamp.commit === "string" && /^[0-9a-f]{4,}$/.test(stamp.commit),
+      `the build stamp names a commit (${stamp.commit})`,
+    );
+    check(
+      typeof stamp.builtAt === "string" && !Number.isNaN(Date.parse(stamp.builtAt)),
+      "the build stamp has a parseable timestamp",
+    );
+    check(
+      typeof stamp.subject === "string",
+      "the build stamp carries the commit subject for the ear-check banner",
+    );
+  }
+  // The ear-check page's whole point is comparing the stamp to the live HEAD,
+  // so it must actually ask for both.
+  const ear = await readFile(new URL("../debug/riff-debug.html", import.meta.url), "utf8");
+  check(ear.includes("__build.json"), "the ear-check page reads the build stamp");
+  check(ear.includes("/__git"), "the ear-check page reads the live git state");
+  check(
+    /STALE BUILD/.test(ear),
+    "the ear-check page warns when the build and the branch disagree",
+  );
+}
+
 // ---- Comments must not eat chord names. ----
 {
   // `F#m7` / `Bb7` are ordinary chords here, so a comment marker only opens a

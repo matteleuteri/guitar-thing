@@ -1,11 +1,33 @@
 import { createServer } from "node:http";
 import { readFile, appendFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
+import { execFileSync } from "node:child_process";
 
 const root = process.cwd();
 const port = Number(process.env.PORT || 5173);
 /** The debug harness appends comparison stats to this gitignored JSON-lines file. */
 const saveFile = join("debug", "comparisons.json");
+
+/**
+ * Live git state, read per request. A page compares this against the commit
+ * baked into dist/__build.json, so switching branches under a running server
+ * shows up as a "stale build" warning instead of silently serving -- and
+ * therefore silently testing -- the previous branch's code.
+ */
+function gitState() {
+  const run = (...args) => {
+    try {
+      return execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    } catch {
+      return "";
+    }
+  };
+  return {
+    branch: run("rev-parse", "--abbrev-ref", "HEAD") || "unknown",
+    commit: run("rev-parse", "--short", "HEAD") || "unknown",
+    dirty: run("status", "--porcelain") !== "",
+  };
+}
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -39,6 +61,16 @@ createServer(async (req, res) => {
     if (req.method !== "GET") {
       res.writeHead(405, { "Content-Type": "text/plain" });
       res.end("Method not allowed");
+      return;
+    }
+    // Live branch/commit, so a page can detect that dist/ was built from a
+    // different commit than the branch it is being served from. Never cached.
+    if (url.pathname === "/__git") {
+      res.writeHead(200, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store",
+      });
+      res.end(JSON.stringify(gitState()));
       return;
     }
     let path = normalize(join(root, url.pathname === "/" ? "index.html" : url.pathname));
