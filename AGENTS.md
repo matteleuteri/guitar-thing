@@ -180,9 +180,9 @@ their events are **unioned on one beat grid** (a chord line and a tab lane at
 the same beat both play — deliberately additive):
 
 ```
-tempo 96        # directives: tempo|bpm, bar, step, strum, release
+tempo 96        # directives: tempo|bpm, bar, step|grid, strum, release
 bar 4           # beats per bar (default 4)
-step 0.5        # beats per tab character column (default 0.5 = eighths)
+step eighths    # how long one column lasts (default: an 8th note)
 strum 55        # default strum width ms for multi-note events (0 = blocked)
 release 1200    # damp each note 1200ms in; 0/absent = let ring (default)
 C Am F G        # a chord line: one chord per bar, spaced or `C|Am|F|G`
@@ -207,6 +207,19 @@ Chord voicings reuse `planGuitarSong`'s DP so the hand moves as little as
 possible; tab events are the explicit-string escape hatch. Note names are
 resolved to *frequencies* via `tuning[stringIndex] + fret`; there is no raw
 Hz/MIDI input yet.
+
+**The grid is named, not counted (`stepValue`/`stepName`).** `step 0.5` is a
+count of *beats*, which is not how anyone says rhythm out loud, so `step`
+(and its alias `grid`) also takes a note-value name — `quarter`, `eighths`,
+`sixteenths`, `eighth triplets`, `16ths`, `1/8`, `triplet 8ths` — normalized
+through one `STEP_NAMES` table that `stepName()` reads back for the UI, so
+what the readout calls the grid is exactly what the notation can ask for. Two
+traps this replaced, both silent: `Number.parseFloat("1/8")` is `1` (a
+sixteenth silently became a quarter), so only a **whole** numeric string counts
+now; and the ordinal rewrite missed `16ths` because `\b` never matches between
+`th` and a plural `s`. Any directive may carry a trailing `#` comment, so the
+value is split at the comment marker *before* anything reads a number — the
+docs annotate every example that way.
 
 **The notation box is live, and Play is honest.** `riffText` has an `input`
 listener → `refreshRiff()` (debounced `RIFF_EDIT_MS` 300 ms: a re-voice of the

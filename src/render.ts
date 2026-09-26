@@ -403,6 +403,95 @@ export function renderRiffTimeline(
   return box;
 }
 
+/**
+ * The "what will I actually hear" list, in the order the ear gets it: one row
+ * per event, grouped under its bar, with the bar, the beat inside it, the
+ * seconds from the top, and the sounding note names.
+ *
+ * The thing this exists to answer is the one the notation box hides: a chord
+ * line is one token (`C`) and the app invents a shape for it, so "C" and
+ * "e|--5---|" both look equally vague on the page. Here the invented shape is
+ * spelled out — frets per string, then the notes — so a mis-voice is visible
+ * without pressing play. Rows are clickable like the timeline's note groups.
+ */
+export function renderRiffReading(
+  events: RiffEvent[],
+  options: {
+    bpm: number;
+    beatsPerBar: number;
+    stepBeats: number;
+    totalBeats: number;
+    tuning: number[];
+    onPlayEvent?: (index: number) => void;
+  },
+): HTMLElement {
+  const { tuning, beatsPerBar, onPlayEvent } = options;
+  // A long riff is a wall of rows, and the timeline below is the overview, so
+  // cap the detail rather than burying the transport controls.
+  const cap = 64;
+  const shown = events.slice(0, cap);
+  const box = el("details", "riff-reading") as HTMLDetailsElement;
+  const seconds = (beat: number) => (beat * 60) / options.bpm;
+  const time = (beat: number) => `${seconds(beat).toFixed(2)}s`;
+  const barCount = options.totalBeats / beatsPerBar;
+  // A piece that is 3.5 bars long is worth showing as "3.5", but an exact one
+  // should not read "4.0 bars" or "1 bars".
+  const barText = `${barCount % 1 ? barCount.toFixed(1) : barCount} bar${barCount === 1 ? "" : "s"}`;
+
+  box.appendChild(
+    el("summary", "riff-reading-head", `What you'll hear · ${barText} · ${options.bpm} bpm · ${time(options.totalBeats)}`),
+  );
+
+  const list = el("div", "riff-reading-list");
+  let bar = -1;
+  shown.forEach((event, index) => {
+    const eventBar = Math.floor(event.beat / beatsPerBar);
+    if (eventBar !== bar) {
+      bar = eventBar;
+      const head = el("div", "riff-reading-bar");
+      head.appendChild(el("span", "riff-reading-bar-name", `Bar ${bar + 1}`));
+      head.appendChild(el("span", "riff-reading-bar-time", time(bar * beatsPerBar)));
+      list.appendChild(head);
+    }
+    const row = el("div", "riff-reading-row");
+    row.dataset.index = String(index);
+    row.appendChild(el("span", "riff-reading-beat", `${(event.beat % beatsPerBar) + 1}`));
+    row.appendChild(el("span", "riff-reading-time", time(event.beat)));
+    // What the page said (`C`, `e5 8`, `5`) — kept verbatim so a row can be
+    // matched back to a column of the notation by eye.
+    row.appendChild(el("span", "riff-reading-label", event.label));
+    const sounded = event.notes
+      .map((note) => midiName(tuning[note.stringIndex] + note.fret))
+      .join(" ");
+    row.appendChild(el("span", "riff-reading-notes", sounded));
+    // Where the shape came from. A chord row is the only one the app invented,
+    // and a chord line plus a tab lane at the same beat prints as TWO rows at
+    // the same beat/time — so each row says which notation produced it.
+    const source =
+      event.kind === "chord"
+        ? "chord, auto-voiced"
+        : event.strumMs > 0
+          ? `tab, strum ${event.strumMs}ms`
+          : "tab";
+    row.appendChild(el("span", "riff-reading-voiced", source));
+    if (onPlayEvent) {
+      row.classList.add("riff-clickable");
+      row.addEventListener("click", (e) => {
+        e.stopPropagation();
+        onPlayEvent(index);
+      });
+    }
+    list.appendChild(row);
+  });
+  box.appendChild(list);
+  if (events.length > shown.length) {
+    box.appendChild(
+      el("div", "muted riff-reading-more", `+ ${events.length - shown.length} more events — use the timeline below.`),
+    );
+  }
+  return box;
+}
+
 /** Move the playhead to a beat (fractional beats allowed). */
 export function setRiffPlayhead(box: HTMLElement, beat: number, totalBeats: number): void {
   const fraction = totalBeats > 0 ? Math.max(0, Math.min(1, beat / totalBeats)) : 0;

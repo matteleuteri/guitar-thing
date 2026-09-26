@@ -80,12 +80,17 @@ mini keyboards with the pressed keys filled in.
 Switch **Mode** to *Riff* to type a chord stream and/or a tab lane and hear it
 played back on a loop, with a speed slider, loop bounds and a per-string
 timeline you can click to audition single events. The timeline re-plans as you
-type, and **Play ▶** always plays what is in the box.
+type, and **Play ▶** always plays what is in the box. A collapsed
+**How to write this** panel sits under the box with the whole syntax, and
+**What you'll hear** above the timeline reads the plan back: every event with
+its bar, beat, seconds, sounding note names, and whether the app picked the
+shape (`chord, auto-voiced`) or you did (`tab`) — so a mis-voice is visible
+before you press play. Click any row to hear that event alone.
 
 ```
 tempo 96        # tempo|bpm, bar, step, strum, release (directives, optional)
 bar 4           # beats per bar
-step 0.5        # beats per tab character column (0.5 = eighths)
+step eighths    # how long one column lasts (0.5 = eighths)
 strum 55        # strum width in ms for multi-note events (0 = all at once)
 release 1200    # damp each note 1.2s in (omit = let it ring, the default)
 C Am F G        # chord line: one chord per bar (or `C|Am|F|G`)
@@ -95,9 +100,17 @@ G|--------------------------------|
 ```
 
 A chord line and a tab lane can appear in the same document — they play
-together, so the chords are the accompaniment and the tab is the melody. Chord
-voicings are chosen automatically (the hand moves as little as possible), so
-the tab lane is the escape hatch when you want exact strings.
+together, so the chords are the accompaniment and the tab is the melody. That
+union is why one beat can print two events in the readout: a chord row and a
+tab row. Chord voicings are chosen automatically (the hand moves as little as
+possible), so the tab lane is the escape hatch when you want exact strings.
+
+`step` sets the grid, and it takes a plain number of beats or a note-value
+name: `quarter`, `eighths`, `sixteenths`, `eighth triplets`, `1/8`, `16ths`,
+`grid 0.25` — all the same thing. Pick it to match your **fastest** note, not
+your average one, because a column is the smallest thing you can write. The
+hint under the timeline names the grid back at you. Any directive can carry a
+trailing `#` comment.
 
 Tab lanes are `e B G D A E` (high `e` first, as you read them); **every character
 is one column**, so in each column `-` `.` `_` or a plain space is a rest, `x`

@@ -71,10 +71,91 @@ const LANE_LINE = /^\s*([eBGDAE])\s*\|([^|]*)\|\s*$/;
 /** A lane that opens with a string letter + `|` but never closes its pipe. */
 const UNCLOSED_LANE = /^\s*[eBGDAE]\s*\|/;
 const MUTE_CHARS = new Set(["x", "X"]);
+
+/**
+ * How long one tab column lasts, in beats. `step 0.5` is a number of BEATS,
+ * which is not how anyone says rhythm out loud — a guitarist thinks "8ths",
+ * "16ths", "triplets". So `step`/`grid` also take note-value names, and the
+ * number keeps working. Spelled as a fraction of a whole note (`1/8`) or as a
+ * word; triplets are three in the time of two, so `eighth triplets` is a third
+ * of a beat.
+ */
+const STEP_NAMES: Record<string, number> = {
+  whole: 4, "1/1": 4,
+  half: 2, "1/2": 2, "1/half": 2,
+  quarter: 1, "1/4": 1, "1/quarter": 1,
+  eighth: 0.5, "1/8": 0.5, "1/eighth": 0.5,
+  sixteenth: 0.25, "1/16": 0.25, "1/sixteenth": 0.25,
+  "thirty-second": 0.125, "1/32": 0.125, "1/thirty-second": 0.125,
+  "eighth triplet": 1 / 3,
+  "quarter triplet": 2 / 3,
+  "sixteenth triplet": 1 / 6,
+};
+
+const ORDINAL_WORDS: Record<string, string> = {
+  "1": "one", "2": "two", "3": "three", "4": "four", "6": "six",
+  8: "eighth", 16: "sixteenth", 32: "thirty-second",
+};
+const FRACTION_WORDS: Record<string, string> = {
+  one: "1", two: "1/2", three: "1/3", four: "1/4", six: "1/6",
+};
+
+/**
+ * Name a grid, for the UI. This is the same vocabulary `stepValue` accepts, so
+ * what the readout calls the grid is what the notation can ask for: with
+ * `step 0.25` it says "one column = a 16th note", which is the thing the
+ * notation box never explained.
+ */
+export function stepName(beats: number): string {
+  const table: [number, string][] = [
+    [4, "a whole note"], [3, "a dotted half note"], [2, "a half note"],
+    [1, "a quarter note"], [2 / 3, "a quarter-note triplet"],
+    [0.5, "an 8th note"], [1 / 3, "an 8th-note triplet"],
+    [0.25, "a 16th note"], [1 / 6, "a 16th-note triplet"],
+    [0.125, "a 32nd note"],
+  ];
+  for (const [value, name] of table) {
+    if (Math.abs(beats - value) < 1e-6) return name;
+  }
+  return `${beats} beat${beats === 1 ? "" : "s"}`;
+}
+
+function stepValue(raw: string): number {
+  // Normalize to a lookup key: lowercase, `1 / 8` -> `1/8`, `8ths` -> `eighth`,
+  // `triplet 8ths` -> `eighth triplet`, and drop a plural on the fractions.
+  let key = raw
+    .trim()
+    .toLowerCase()
+    .replace(/\s*\/\s*/g, "/")
+    .replace(/\btriplets?\b/g, "triplet")
+    // `s?` is required: without it the `\b` never matches in `16ths`, because
+    // the trailing `s` is a word character, and the whole word is skipped.
+    .replace(/(\d+)(?:st|nd|rd|th)s?\b/g, (_m, digits: string) => `${ORDINAL_WORDS[digits] ?? digits} `)
+    .replace(/\b(one|two|three|four|six)\b\//, (_m, n: string) => `${FRACTION_WORDS[n]}/`)
+    .replace(/[.,]+$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  // `triplet eighths` is how people say it; the table lists `eighth triplet`.
+  const flipped = /^triplet (.+)$/.exec(key);
+  if (flipped) key = `${flipped[1].replace(/s$/, "")} triplet`;
+  if (!key.endsWith("triplet")) key = key.replace(/s$/, "");
+
+  const named = STEP_NAMES[key];
+  if (named !== undefined) return named;
+  // Only a WHOLE numeric string is a beat count. `parseFloat` would happily read
+  // the "1" out of `1/8` and turn a sixteenth into a quarter.
+  if (/^\d*\.?\d+$/.test(key)) return Number.parseFloat(key);
+  throw new Error(
+    `"${raw}" is not a note length. Use a number of beats (0.5) or a name: ` +
+      `whole, half, quarter, eighths, sixteenths, or eighth triplets.`,
+  );
+}
+
+
 const REST_CHARS = new Set(["-", ".", "_"]);
 /** Suffix markers a player writes after a fret (bend, pull-off, let-ring). */
 const FRET_MARKS = new Set(["'", "?", "b", "h", "p", "~", "*"]);
-const DIRECTIVES = new Set(["tempo", "bpm", "bar", "step", "strum", "release"]);
+const DIRECTIVES = new Set(["tempo", "bpm", "bar", "step", "grid", "strum", "release"]);
 
 function clamp(value: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, value));
@@ -168,27 +249,31 @@ export function parseRiff(text: string, options: RiffOptions): Riff {
 
     const directive = /^([a-z]+)\s+(.+)$/i.exec(line);
     const key = directive ? directive[1].toLowerCase() : "";
-    const rest = directive ? directive[2].trim() : "";
     // A chord line like `C Am F G` also matches the directive shape, so a line
     // is only treated as a directive when its first word is a KNOWN keyword.
     // A single unknown word followed by a number is a typo'd directive and gets
     // that error; anything else falls through to the chord stream.
     const isDirective = key !== "" && DIRECTIVES.has(key);
-    if (!isDirective && directive && !Number.isNaN(Number.parseFloat(rest))) {
+    // A directive may carry a trailing comment: `step eighths  # 8th-note
+    // grid`. Only the value's own text is parsed, so the comment has to come
+    // off before anything tries to read a number or a name out of it.
+    const value = directive ? directive[2].split(/(?:#|\/\/)/, 1)[0].trim() : "";
+    if (!isDirective && directive && !Number.isNaN(Number.parseFloat(value))) {
       throw new Error(
         `Line ${lineNo}: unknown directive "${directive[1]}" (try ${[...DIRECTIVES].join(", ")}).`,
       );
     }
     const number = (): number => {
-      const value = Number.parseFloat(rest);
-      if (!Number.isFinite(value)) throw new Error(`Line ${lineNo}: "${key}" needs a number.`);
-      return value;
+      const n = Number.parseFloat(value);
+      if (!Number.isFinite(n)) throw new Error(`Line ${lineNo}: "${key}" needs a number.`);
+      return n;
     };
 
     if (isDirective && (key === "tempo" || key === "bpm")) bpm = clamp(number(), 20, 400);
     else if (isDirective && key === "bar") beatsPerBar = clamp(number(), 1, 12);
-    else if (isDirective && key === "step") stepBeats = clamp(number(), 0.0625, beatsPerBar);
-    else if (isDirective && key === "strum") strumMs = clamp(number(), 0, 2000);
+    else if (isDirective && (key === "step" || key === "grid")) {
+      stepBeats = clamp(stepValue(value), 0.0625, beatsPerBar);
+    } else if (isDirective && key === "strum") strumMs = clamp(number(), 0, 2000);
     else if (isDirective && key === "release") releaseMs = clamp(number(), 0, 4000);
     else {
       const lane = LANE_LINE.exec(line);

@@ -2,7 +2,7 @@ import { findFingerings, findPositions } from "../dist/fretboard.js";
 import { findPianoKeys, findPianoVoicings } from "../dist/piano.js";
 import { chordName, midiName, noteName, parseNotes, parseStringMidi, parseChord } from "../dist/theory.js";
 import { parseProgression, planGuitarSong, planPianoSong } from "../dist/song.js";
-import { parseRiff, secondsPerBeat } from "../dist/riff.js";
+import { parseRiff, secondsPerBeat, stepName } from "../dist/riff.js";
 import { RiffTransport } from "../dist/transport.js";
 import { readFile } from "node:fs/promises";
 
@@ -296,6 +296,49 @@ const riffOpts = { tuning: STANDARD, maxFrets: 15, span: 5, cap: 200 };
   check(a.events.length === 8, `one event per column across two lanes (got ${a.events.length})`);
   check(a.events[3].beat === 1.5, `default step 0.5 -> beat 1.5 (got ${a.events[3].beat})`);
   check(b.events[3].beat === 3, `step 1 -> beat 3 (got ${b.events[3].beat})`);
+}
+
+// --- the grid can be named the way a guitarist says it ---
+// `step 0.5` is a count of BEATS, which is not how rhythm is spoken: the
+// default grid is "an 8th note" and nobody says "a half beat". So `step` takes
+// note-value names as well as numbers, and the name is what the readout calls
+// the grid back. Two silent traps this replaces: `parseFloat` read the "1" out
+// of "1/8" (a sixteenth became a quarter), and the ordinal rewrite missed
+// "16ths" entirely because `\b` never matches before a plural "s".
+{
+  const lane = "e|--5-5-5-5-|";
+  const grid = (spec) => parseRiff(`${spec}\n${lane}`, riffOpts).stepBeats;
+  const names = [
+    ["step 0.5", 0.5], ["step 0.25", 0.25], ["step .5", 0.5],
+    ["step eighths", 0.5], ["step eighth", 0.5], ["step 16ths", 0.25],
+    ["step 1/8", 0.5], ["step 1/16", 0.25], ["step 1 / 8", 0.5], ["step 1/8ths", 0.5],
+    ["grid sixteenths", 0.25], ["step quarter", 1], ["step half", 2], ["step whole", 4],
+    ["STEP Sixteenths", 0.25],
+    ["step eighth triplets", 1 / 3], ["step triplet 8ths", 1 / 3], ["step 8th triplets", 1 / 3],
+    ["step sixteenth triplets", 1 / 6],
+  ];
+  for (const [spec, want] of names) {
+    check(Math.abs(grid(spec) - want) < 1e-9, `grid "${spec}" -> ${want} beats/column (got ${grid(spec)})`);
+  }
+  // A name that is not a note length must not fall back to reading a number out
+  // of it: "1/5" parses as 1 under parseFloat, which would silently be a
+  // quarter note.
+  for (const bad of ["step bananas", "grid 1/5", "step 1/5", "step eighths and a half"]) {
+    throws(() => parseRiff(`${bad}\n${lane}`, riffOpts), `grid: "${bad}" throws`);
+  }
+  check(stepName(0.5) === "an 8th note", `stepName(0.5) names the default grid (got ${stepName(0.5)})`);
+  check(stepName(0.25) === "a 16th note", `stepName(0.25) (got ${stepName(0.25)})`);
+  check(stepName(1 / 3) === "an 8th-note triplet", `stepName(1/3) (got ${stepName(1 / 3)})`);
+  // A directive may carry a trailing comment, which is how both this file and
+  // the README annotate the default grid.
+  check(
+    Math.abs(parseRiff(`step eighths  # 8th grid\n${lane}`, riffOpts).stepBeats - 0.5) < 1e-9,
+    "grid: a trailing comment does not reach the value parser",
+  );
+  check(
+    parseRiff(`tempo 96  # slow\n${lane}`, riffOpts).bpm === 96,
+    "grid: a commented tempo still parses",
+  );
 }
 
 // --- every CHARACTER is a column, spaces included ---

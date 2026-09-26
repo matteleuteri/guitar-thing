@@ -2,8 +2,8 @@ import { stopAudio, playNotes, playVoicing, preloadGuitarEngine, primeAudio, aud
 import { DEFAULT_CONFIG } from "./synth/config.js";
 import { findFingerings, type Fingering } from "./fretboard.js";
 import { findPianoVoicings, type PianoVoicing } from "./piano.js";
-import { colorFor, el, renderChordDiagram, renderPiano, renderPianoVoicing, renderPositions, renderRiffTimeline, setRiffPlayhead } from "./render.js";
-import { parseRiff, secondsPerBeat, type Riff, type RiffEvent } from "./riff.js";
+import { colorFor, el, renderChordDiagram, renderPiano, renderPianoVoicing, renderPositions, renderRiffReading, renderRiffTimeline, setRiffPlayhead } from "./render.js";
+import { parseRiff, secondsPerBeat, stepName, type Riff, type RiffEvent } from "./riff.js";
 import { RiffTransport } from "./transport.js";
 import {
   chordName,
@@ -295,6 +295,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let riffPlan: Riff | null = null;
   let riffTuning: number[] = TUNINGS[0].midi;
   let riffTimeline: HTMLElement | null = null;
+  let riffReadingOpen: boolean | null = null;
   let riffFrame = 0;
 
   const stopRiff = () => {
@@ -548,19 +549,37 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     const loop = riffLoop(riff);
+    const playEvent = (index: number) => {
+      const event = riff.events[index];
+      if (event) playVoicing(event.frets, params.tuning, { strumMs: event.strumMs, releaseMs: riff.releaseMs });
+    };
+
+    // Keep the reader's own collapse choice across re-renders: it is rebuilt on
+    // every keystroke, and a `<details>` that springs open each time is worse
+    // than not having it.
+    const reading = renderRiffReading(riff.events, {
+      bpm: riff.bpm,
+      beatsPerBar: riff.beatsPerBar,
+      stepBeats: riff.stepBeats,
+      totalBeats: riff.totalBeats,
+      tuning: params.tuning,
+      onPlayEvent: playEvent,
+    }) as HTMLDetailsElement;
+    if (riffReadingOpen !== null) reading.open = riffReadingOpen;
+    reading.addEventListener("toggle", () => {
+      riffReadingOpen = reading.open;
+    });
+    chordList.appendChild(reading);
 
     const box = renderRiffTimeline(riff.events, riff.beatsPerBar, riff.stepBeats, riff.totalBeats, {
       tuning: params.tuning,
       loop,
-      onPlayEvent: (index) => {
-        const event = riff.events[index];
-        if (event) playVoicing(event.frets, params.tuning, { strumMs: event.strumMs, releaseMs: riff.releaseMs });
-      },
+      onPlayEvent: playEvent,
     });
     riffTimeline = box;
     chordList.appendChild(box);
     chordList.appendChild(
-      el("div", "muted riff-hint", "Click any note group to hear just that event. Chords are voiced for the smallest hand movement across the whole stream."),
+      el("div", "muted riff-hint", "One column = " + stepName(riff.stepBeats) + ". Click any note group, or any row above, to hear just that event."),
     );
     return riff;
   }

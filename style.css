@@ -541,3 +541,58 @@ h2 .muted { font-size: .85rem; font-weight: 400; color: var(--muted); }
 .pp { position: relative; height: calc(var(--key-w, 2.4rem) * 2.9); width: 100%; min-width: 8rem; padding: .4rem; border: 1px solid var(--line); }
 .pp .kb-mark { font-size: calc(var(--key-w, 2.4rem) * .3); }
 .pp-hit { color: #06121c; font-weight: 700; }
+/* "What you'll hear" — the notation box says `C` and `e|--5---|`; this spells
+   out the event list, bars, times and note names the plan actually produced. */
+.riff-reading {
+  margin: .45rem 0 .8rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-2);
+  font-size: .82rem;
+}
+.riff-reading-head { cursor: pointer; padding: .45rem .6rem; color: var(--muted); }
+.riff-reading[open] .riff-reading-head { border-bottom: 1px solid var(--line); }
+.riff-reading-list { padding: .35rem 0 .45rem; }
+.riff-reading-more { padding: .4rem .6rem; font-size: .78rem; }
+.riff-reading-bar {
+  display: flex;
+  align-items: baseline;
+  gap: .5rem;
+  padding: .35rem .6rem .2rem;
+  color: var(--accent);
+  font-size: .74rem;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.riff-reading-bar-time { color: var(--muted); letter-spacing: 0; }
+.riff-reading-row {
+  display: grid;
+  grid-template-columns: 2.1rem 3.4rem minmax(5rem, 9rem) 1fr auto;
+  gap: .5rem;
+  align-items: baseline;
+  padding: .12rem .6rem;
+}
+/* The number columns are tabular so the times stay in column as you read down,
+   which is the whole point of a list like this. */
+.riff-reading-beat, .riff-reading-time { color: var(--muted); font-variant-numeric: tabular-nums; }
+.riff-reading-label { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.riff-reading-notes { color: var(--text); }
+.riff-reading-voiced { color: var(--muted); font-size: .74rem; }
+.riff-reading-row.riff-clickable:hover { background: rgba(76, 194, 255, .1); }
+/* Its own row under the box: it is documentation, not a field. */
+.riff-legend { flex: 1 1 100%; margin: 0 0 .6rem; font-size: .84rem; }
+.riff-legend > summary { cursor: pointer; color: var(--muted); }
+.riff-legend-body { margin-top: .5rem; columns: 2; column-gap: 2rem; }
+.riff-legend-body ul { margin: 0 0 .4rem; padding-left: 1.1rem; break-inside: avoid; }
+.riff-legend-body code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0 .25rem;
+}
+@media (max-width: 700px) {
+  .riff-legend-body { columns: 1; }
+  .riff-reading-row { grid-template-columns: 1.8rem 3.2rem 1fr; }
+  .riff-reading-voiced { display: none; }
+}
