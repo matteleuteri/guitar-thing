@@ -75,17 +75,34 @@ Each card shows the chord name (with "also …" aliases for ambiguous spellings 
 suggested finger numbers, barre notes, and the sounding notes. Piano voicings render as
 mini keyboards with the pressed keys filled in.
 
-### Riff mode (chords + tab)
+### Riff builder (chords + tab) — its own page
 
-Switch **Mode** to *Riff* to type a chord stream and/or a tab lane and hear it
-played back on a loop, with a speed slider, loop bounds and a per-string
-timeline you can click to audition single events. The timeline re-plans as you
-type, and **Play ▶** always plays what is in the box. A collapsed
-**How to write this** panel sits under the box with the whole syntax, and
-**What you'll hear** above the timeline reads the plan back: every event with
-its bar, beat, seconds, sounding note names, and whether the app picked the
-shape (`chord, auto-voiced`) or you did (`tab`) — so a mis-voice is visible
-before you press play. Click any row to hear that event alone.
+<a href="./riff.html"><strong>Riff builder →</strong></a> is a separate page, not
+a mode on this one — the finder is already busy enough. Type a chord stream
+and/or a tab lane and hear it played back on a loop, with a speed slider, loop
+bounds and a per-string timeline you can click to audition single events. The
+timeline re-plans as you type, and **Play ▶** always plays what is in the box.
+
+**Walking a chord through its voicings** is the reason it is its own page. A
+chord name is pitch classes only — `C` carries no frets — so the app *searches*
+for a shape, and the search is a guess: it minimises hand movement, and because
+it charges nothing for a muted string it will happily hand you a three-string
+`xx201x` where a guitarist plays `x32010`. The **Chord voicings** panel lists
+one tab per chord in the progression; pick one and step through what the search
+found, ordered by how little your hand moves from the chord before it (ties go
+to the fuller, lower-on-the-neck shape, which is the one you would reach for).
+The shape is printed, drawn as a chord diagram, and **▶ Hear it** plays it alone.
+
+A stepped choice is **pinned**: it plays exactly those frets and the chords
+*after* it re-optimise around it. **Auto** hands the chord back to the search.
+One `best ▲` on the shipped `C Am F G` takes the whole progression from
+`xx201x xx221x xx321x xx000x` to `032010 032210 133211 320003` — the open
+shapes — and then ◀ ▶ walks the rest.
+
+**What you'll hear** above the timeline reads the plan back: one row per *moment*
+with its bar, beat, seconds, the shape, the sounding note names, and whether the
+app picked the voicing or you did — so a mis-voice is visible before you press
+play. Click any row to hear that moment alone.
 
 ```
 tempo 96        # tempo|bpm, bar, step, strum, release (directives, optional)
@@ -175,7 +192,7 @@ body EQ and a small room tail. Each guitar string has a fixed character
 (pickup-style EQ, attack, scrape brightness/length); the chord's root and color
 tones are accented systematically, with only a thin random humanizing sliver
 (detune, jitter) left over. Guitar chords strum treble → bass one string at a
-time (adjustable via the "Strum speed (ms)" field, and per-event in Riff mode)
+time (adjustable via the "Strum speed (ms)" field, and per-event in the riff builder)
 and piano voicings roll ~8 ms so voices don't fuse. All of it is tunable from one
 config constant: `DEFAULT_CONFIG` in `src/synth/config.ts`.
 

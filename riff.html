@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Riff builder — guitar-thing</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body class="riff-page">
+    <header>
+      <h1>Riff builder</h1>
+      <p class="muted">
+        Write a chord stream and/or tab lanes, hear it, then walk each chord
+        through its voicings until it is the shape you would actually play.
+        <a href="./index.html">← Note/chord finder</a>
+      </p>
+    </header>
+
+    <main>
+      <section id="notation">
+        <h2>Notation</h2>
+        <div class="field field-wide">
+          <div class="riff-box">
+            <div class="riff-grid" id="riff-grid" aria-hidden="true"></div>
+            <textarea
+              id="riff-text"
+              rows="9"
+              spellcheck="false"
+              title="Chord stream and/or tab lanes. Directives: tempo|bpm, bar, step|grid, strum, release — see 'How to write this' below."
+            >tempo 96
+strum 55
+  C       Am      F       G
+e|5---5---7---7---8---8---7---5---|
+B|----------------3---5---5---3---|
+G|--------------------------------|</textarea
+            >
+          </div>
+        </div>
+        <p id="riff-error" class="error" hidden></p>
+        <details class="riff-legend">
+          <summary>How to write this — syntax, the bar ruler, and what plays</summary>
+          <div class="riff-legend-body">
+            <ul>
+              <li>
+                A <strong>chord line</strong> is one chord per bar, read left to right. Spaces or <code>|</code> both
+                work, and the spacing is yours to choose — see the bar ruler below.
+              </li>
+              <li>
+                A <strong>tab lane</strong> is <code>LANE|</code> plus the notes, one per character column:
+                <code>e|5---7---|</code>. Lanes are <code>e B G D A E</code>.
+              </li>
+              <li>
+                <strong>They play together, not instead of each other.</strong> A chord and a tab note on the same
+                beat sound as one moment: the chord with the note <em>on top of it</em>, exactly as you'd strum it.
+                The "What you'll hear" list spells that out as
+                <code>C + 5 | xx201x | E3 G3 C4 with A4 on top</code>.
+              </li>
+              <li>
+                The <strong>bar ruler</strong> above the box is the shared grid: each number sits at the character where
+                that bar starts, two characters along (a tab column starts after the <code>e|</code>). Pad the chord
+                line so its tokens land on those numbers and both layers line up — it changes nothing you hear, it just
+                makes the alignment visible. <code>C Am F G</code> and <code>C&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Am</code>
+                are the same four chords.
+              </li>
+              <li>
+                Space, <code>-</code>, <code>.</code> and <code>_</code> are rests. <code>x</code> is a muted string. A
+                two-digit fret uses two columns, so <code>10</code> is wider than <code>9</code>.
+              </li>
+              <li>
+                Every lane must be the <strong>same number of characters</strong> — pad the short ones with dashes, or a
+                bar shifts sideways.
+              </li>
+            </ul>
+            <ul>
+              <li><code>tempo 96</code> — bpm (<code>bpm</code> also works).</li>
+              <li><code>bar 4</code> — beats per bar. Only needed to change 4/4.</li>
+              <li>
+                <code>step eighths</code> — how long one column lasts. Take it from your <em>fastest</em> note:
+                <code>quarter</code>, <code>eighths</code>, <code>sixteenths</code>, <code>eighth triplets</code>, or a
+                plain number of beats like <code>0.25</code>. The reader names the grid back at you.
+              </li>
+              <li><code>strum 55</code> — ms between strings. <code>0</code> blocks the chord.</li>
+              <li><code>release 400</code> — damp each note early. Omit it to let the ring, which is the default.</li>
+              <li>Everything is optional except the notes. Lines starting with <code>#</code> are comments.</li>
+            </ul>
+            <p class="muted">
+              A chord name is pitch classes only — <code>C</code> does not carry frets, so the app searches for a shape.
+              Use <strong>Chord voicings</strong> below to step through what it found and pin the one you want.
+            </p>
+          </div>
+        </details>
+      </section>
+
+      <section id="voicing-settings">
+        <h2>Voicing search</h2>
+        <div class="field-row">
+          <div class="field">
+            <label for="tuning">Tuning</label>
+            <select id="tuning"></select>
+          </div>
+          <div class="field">
+            <label for="frets">Frets</label>
+            <input id="frets" type="number" min="7" max="24" value="15" />
+          </div>
+          <div class="field">
+            <label for="span">Max span</label>
+            <input id="span" type="number" min="1" max="24" value="5" />
+          </div>
+          <div class="field">
+            <label for="cap">Voicings / chord</label>
+            <input id="cap" type="number" min="1" max="10000" value="400" />
+          </div>
+          <div class="field">
+            <label for="strum">Strum speed (ms)</label>
+            <input id="strum" type="number" min="0" max="400" step="10" value="140" title="Delay between strings when a chord plays; 0 = all at once" />
+          </div>
+          <div class="field">
+            <label for="kit">Guitar sample</label>
+            <button id="kit" type="button" title="Switch the sampled guitar kit between steel-string acoustic and classical nylon">Steel-string acoustic</button>
+          </div>
+        </div>
+        <details id="custom-tuning" hidden>
+          <summary>Custom tuning strings (low → high, note + optional octave, e.g. E2 A2 D3 G3 B3 E4)</summary>
+          <div class="custom-strings">
+            <input value="E2" /><input value="A2" /><input value="D3" /><input value="G3" /><input value="B3" /><input value="E4" />
+          </div>
+        </details>
+      </section>
+
+      <section id="voicings">
+        <h2>Chord voicings <span id="voicing-summary" class="muted"></span></h2>
+        <p class="muted">
+          Every chord in the stream, in order. Pick one, then step through its voicings — the list is ordered by how
+          little your hand moves from the chord before it, so the first few are the smoothest. <strong>Auto</strong>
+          hands the chord back to the search; a stepped choice is <em>pinned</em>, and the chords after it re-optimize
+          around it.
+        </p>
+        <div id="voicing-tabs" class="voicing-tabs"></div>
+        <div id="voicing-picker" class="voicing-picker"></div>
+      </section>
+
+      <section id="playback">
+        <h2>Playback</h2>
+        <div class="field-row">
+          <div class="field">
+            <label for="riff-scale">Speed (%)</label>
+            <input id="riff-scale" type="number" min="25" max="200" step="5" value="100" title="Playback tempo as a percentage of the written tempo, for learning a riff slowly" />
+          </div>
+          <div class="field">
+            <label for="riff-loop-start">Loop from bar</label>
+            <input id="riff-loop-start" type="number" min="1" max="64" step="1" value="1" />
+          </div>
+          <div class="field">
+            <label for="riff-loop-end">Loop to bar</label>
+            <input id="riff-loop-end" type="number" min="1" max="64" step="1" value="2" />
+          </div>
+          <div class="field">
+            <label>&nbsp;</label>
+            <span class="riff-transport">
+              <button id="riff-play" type="button">Play ▶</button>
+              <button id="riff-stop" type="button">Stop</button>
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <section id="output">
+        <h2>What you'll hear <span id="riff-summary" class="muted"></span></h2>
+        <div id="riff-output"></div>
+      </section>
+    </main>
+
+    <script type="module" src="./dist/riff-main.js"></script>
+  </body>
+</html>

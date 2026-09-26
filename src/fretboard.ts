@@ -128,3 +128,21 @@ export function findFingerings(
 
   return { fingerings, truncated };
 }
+/**
+ * A fingering as printed chord-shape text, low string first: `xx201x`. `x` is a
+ * muted string. This is the tab for a voicing, and it is what a chord shape can
+ * be *written* as, so it is also the identity used to pin a chord to a chosen
+ * voicing (see `planGuitarSong`'s `pins`).
+ */
+export function chordShape(frets: (number | null)[]): string {
+  return frets.map((fret) => (fret === null ? "x" : String(fret))).join("");
+}
+
+/** Parse a printed shape back into frets, or null if it is not a valid shape. */
+export function parseChordShape(shape: string): (number | null)[] | null {
+  if (!/^[0-9x]{6}$/.test(shape)) return null;
+  const frets = shape.split("").map((ch) => (ch === "x" ? null : Number(ch)));
+  const sounded = frets.filter((fret) => fret !== null);
+  if (sounded.length < 2) return null;
+  return frets as (number | null)[];
+}

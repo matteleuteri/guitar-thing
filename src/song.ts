@@ -1,4 +1,4 @@
-import { findFingerings, type Fingering } from "./fretboard.js";
+import { chordShape, findFingerings, parseChordShape, type Fingering } from "./fretboard.js";
 import { findPianoVoicings, type PianoVoicing } from "./piano.js";
 import { parseChord, chordName, SEMITONES, type ParsedChord } from "./theory.js";
 
@@ -16,6 +16,9 @@ const POSITION_WEIGHT = 0.5;         // extra penalty per fret of hand shift
 const BASS_PENALTY = 2;              // penalty when the lowest note != written bass
 
 /** Split a chord-sheet line into chord tokens (space/comma/semicolon/bar). */
+/** A pin that cannot be honoured: a malformed shape, or one the span excludes. */
+export class PinError extends Error {}
+
 export function parseProgression(input: string): ParsedChord[] {
   const tokens = input.split(/[\s,;|]+/).map((token) => token.trim()).filter(Boolean);
   if (tokens.length === 0) throw new Error("Enter at least one chord, e.g. C G Am F.");
@@ -23,6 +26,17 @@ export function parseProgression(input: string): ParsedChord[] {
     throw new Error('"N.C." (no chord) is not supported yet.');
   }
   return tokens.map((token) => parseChord(token));
+}
+
+/**
+ * A user-chosen voicing for one chord of a progression, overriding the search.
+ * `name` is the chord the choice was made for and is checked before the pin is
+ * honoured, so editing the chord stream drops a pin that no longer refers to the
+ * chord under it instead of silently re-voicing a different chord.
+ */
+export interface VoicingPin {
+  name: string;
+  shape: string;
 }
 
 /** Generic shortest-path selection: dp[i][j] = min cost ending chord i at voicing j. */
@@ -133,13 +147,28 @@ export function planGuitarSong(
   maxFrets: number,
   span: number,
   cap = SONG_CAP,
+  pins: VoicingPin[] = [],
 ): GuitarSongPlan | null {
   const budget = Math.max(1, Math.min(cap, SONG_CAP));
   let truncated = false;
-  const candidates = progression.map((chord) => {
+  const candidates = progression.map((chord, index) => {
     const result = findFingerings(chord.pitchClasses, tuning, maxFrets, span, budget);
     if (result.truncated) truncated = true;
-    return result.fingerings;
+    const pin = pins[index];
+    if (!pin || pin.name !== chord.name) return result.fingerings;
+    // A pin is a command, not a preference: narrow to the one shape. It has to
+    // be in the candidate set to be playable at all, so a shape outside the
+    // fret span is a hard error rather than a silent fallback to auto.
+    const wanted = parseChordShape(pin.shape);
+    const pinned = result.fingerings.filter((f) => chordShape(f.frets) === pin.shape);
+    if (pinned.length === 0) {
+      throw new PinError(
+        wanted === null
+          ? `Chord "${chord.name}": "${pin.shape}" is not a shape (six characters, one per string, x for a muted string).`
+          : `Chord "${chord.name}": ${pin.shape} does not sound the chord within ${span} frets.`,
+      );
+    }
+    return pinned;
   });
   if (candidates.some((c) => c.length === 0)) return null;
 
@@ -166,6 +195,51 @@ export function planGuitarSong(
     });
   }
   return { kind: "guitar", chords, totalMove, truncated };
+}
+
+/**
+ * Every voicing of one chord, ordered by how well it moves from `from` (the
+ * previous chord's chosen shape, or null for the first chord). This is what the
+ * riff builder's voicing browser walks: the search proposes the smoothest
+ * options first, the user overrides by stepping through them. The candidate set
+ * is the same one the DP would choose from, so stepping cannot land on a shape
+ * the search would have refused.
+ */
+export function rankGuitarVoicings(
+  pitchClasses: number[],
+  tuning: number[],
+  maxFrets: number,
+  span: number,
+  from: (number | null)[] | null,
+  cap = SONG_CAP,
+): { frets: (number | null)[]; shape: string; cost: number; sounded: number; top: number }[] {
+  const budget = Math.max(1, Math.min(cap, SONG_CAP));
+  const result = findFingerings(pitchClasses, tuning, maxFrets, span, budget);
+  const origin: Fingering | null = from ? { frets: from } : null;
+  return result.fingerings
+    .map((fingering) => {
+      const fretted = fingering.frets.filter((fret): fret is number => fret !== null);
+      return {
+        frets: fingering.frets,
+        shape: chordShape(fingering.frets),
+        cost: origin ? guitarTransition(origin, fingering).cost : 0,
+        sounded: fretted.length,
+        // The highest fret actually stopped: "how far up the neck is this".
+        top: fretted.length > 0 ? Math.max(...fretted) : 0,
+      };
+    })
+    .sort((a, b) =>
+      a.cost - b.cost ||
+      // Ties are broken toward the shape a guitarist would reach for: more
+      // strings sounding first, then lower on the neck. Without this the list
+      // falls through to alphabetical order, and the first chord — where every
+      // candidate costs the same, since there is nothing to move from — lands
+      // the search's own pick at an arbitrary rank like 382 of 400, so stepping
+      // through the list walks into noise instead of toward better shapes.
+      b.sounded - a.sounded ||
+      a.top - b.top ||
+      a.shape.localeCompare(b.shape),
+    );
 }
 
 /* -------------------------------- piano ------------------------------ */

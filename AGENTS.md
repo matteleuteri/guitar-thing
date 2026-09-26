@@ -151,7 +151,7 @@ The live site is https://matteleuteri.github.io/guitar-thing/. It is **not** bui
 from the local `dist/` (that folder is gitignored). CI owns it:
 
 - `.github/workflows/pages.yml` runs on every push to `main`: `npm ci` → `npm run
-  build` → copies `index.html`, `style.css`, `dist/`, `debug/`, `assets/` into
+  build` → copies `index.html`, `riff.html`, `style.css`, `dist/`, `debug/`, `assets/` into
   `_site/` → uploads as a Pages artifact → `actions/deploy-pages`. No secrets
   used.
 - Live site updates a minute or two after a push. `gh run watch` on the latest
@@ -159,12 +159,53 @@ from the local `dist/` (that folder is gitignored). CI owns it:
 - Local development is fully independent: edit → `npm run build` → `node
   server.mjs` → `localhost:5173`. Committing without pushing never affects the
   live site.
-- All asset paths in `index.html` (`style.css`, `./dist/main.js`, `debug/`) are
-  relative, so the `/guitar-thing/` subdirectory hosting works unchanged. The
+- All asset paths in `index.html` (`style.css`, `./dist/main.js`, `debug/`) and
+  in `riff.html` (`style.css`, `./dist/riff-main.js`) are relative, so the
+  `/guitar-thing/` subdirectory hosting works unchanged. **The workflow copies
+  pages by name** — a new page that is not in its `cp` line is a 404 in
+  production and nothing local would notice. `smoke.mjs` asserts `riff.html` is
+  in the list. The
   audio catables (`assets/guitar-steel-ogg.js`, `assets/smplr.mjs`) ship the
   same way — see the Audio section below.
 
-## Riff trainer (the active work)
+## Riff builder (the active work)
+
+**It is its own page** — `riff.html` + `src/riff-main.ts`, linked from
+`index.html`. The user asked to diverge from the finder page because that page
+was "already busy" (their words); Riff is no longer a `<option>` in the Mode
+select and `main.ts` carries no riff code at all. Two entry points, one
+`style.css`.
+
+**The voicing browser is the reason it is a separate page.** A chord name is
+pitch classes only, so the frets were always a guess by `planGuitarSong` — the
+user asked three times why the tab of a chord was not shown, who chose it, and
+whether the input box could specify it (it could not: `C x32010`, `C/x32010`,
+`C[32010]` and `C:x32010` were all rejected as chord names). The answer was
+"the app chose it, silently", so the page gives them the chooser.
+
+- **Pins** (`planGuitarSong`'s last argument, `VoicingPin[]`) are index-aligned
+  with the chord stream and each carries the chord `name` it was made for. The
+  name is re-checked on every parse, so editing the progression **drops a pin
+  that no longer refers to the chord under it** rather than silently re-voicing
+  a different chord. A pin is a command, not a preference: a shape the span
+  cannot play throws `PinError` with a legible message instead of falling back
+  to auto, because a silent fallback leaves you hearing a shape you did not pick.
+- **`rankGuitarVoicings`** is the browse list, and it is the DP's own candidate
+  set, so stepping cannot land on something the search would have refused.
+  Order: movement cost asc, then **more strings sounding**, then **lower on the
+  neck**, then shape. The tie-break is load-bearing: with no previous chord
+  every candidate costs 0, so an alphabetical fallback put the search's own pick
+  at rank 350 of 400 and made ◀ ▶ walk *deeper* into the thin tail. Because the
+  order is best-first, the picker also needs a `best ▲` jump — the arrows alone
+  cannot get you off a deep rank.
+- `chordShape`/`parseChordShape` live in `fretboard.ts` (with the frets they
+  format) and a shape is the *identity* of a pin, so a pin is printable,
+  copyable and testable.
+- `rankGuitarVoicings` returns `sounded`/`top` so the UI can say "3 strings"
+  and "347 fuller voicings sit above it" instead of just "350 of 400", which
+  reads as a bug rather than as the cost function's missing term.
+
+## Riff notation (the parser)
 
 The user's goal: type what they want to hear, hear it, then learn it by hand.
 **One model covers chords and riffs** — an event is a set of notes with a start
@@ -320,7 +361,7 @@ previous note is still loud — a click-free damp needs a per-voice gain, and th
 one-gate-per-string chain is what enforces the one-sound rule.
 
 **The notation we ship is parse-tested.** `scripts/smoke.mjs` reads the Riff
-textarea out of `index.html` and every fenced tab example out of `README.md` and
+textarea out of `riff.html` and every fenced tab example out of `README.md` and
 this file, and asserts each one parses with no warnings. A tab lane's length is
 its character count, so a hand-edited example silently breaks the *app's own
 default* (it once shipped 26- vs 29-column lanes, and a fresh Riff page opened
@@ -337,8 +378,10 @@ same pixel.
 
 ## Structure
 
-- `index.html`, `style.css` — single page, dark theme. CSS class prefixes: `fb-`
-  (fretboard positions), `cd-` (chord diagram), `riff-` (riff timeline),
+- `index.html` (the finder), `riff.html` (the riff builder) + `src/riff-main.ts`
+  (its entry point) — two pages, dark theme. CSS class prefixes: `fb-`
+  (fretboard positions), `cd-` (chord diagram), `riff-` (riff timeline and
+  `voicing-` for the picker),
   `.diagrams`, `.chord-card`.
 - `src/theory.ts` — pitch classes, parsing, tunings, chord-name identification.
 - `src/fretboard.ts` — `findPositions` + `findFingerings` (guitar core algorithm).
@@ -397,9 +440,12 @@ same pixel.
   sounding good", so a fresh origin plays the K–S synth instead.
 - `src/riff.ts` — riff-trainer model (`Riff`, `RiffEvent`) + the "chord stream
   + tab lane" parser. See "Riff trainer" above.
-- `src/transport.ts` — `RiffTransport`, the lookahead scheduler behind Riff mode
-  playback (injected clock/ticker so the smoke test can drive it).
-- `src/main.ts` — UI wiring, form handling, guitar/piano/riff orchestration (entry point).
+- `src/transport.ts` — `RiffTransport`, the lookahead scheduler behind the riff
+  builder's playback (injected clock/ticker so the smoke test can drive it).
+- `src/main.ts` — UI wiring, form handling, guitar/piano orchestration (the
+  finder's entry point; no riff code).
+- `src/riff-main.ts` — the riff builder's wiring: notation editor, voicing
+  browser + pins, transport (its entry point).
 - `scripts/smoke.mjs` — Node checks of the compiled theory/fingering output.
 - `scripts/audio-sched.mjs` — Node checks of the compiled audio *scheduling* graph
   (stubbed Web Audio): every voice must be silent from t=0 until its strum slot,

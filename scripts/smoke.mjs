@@ -1,8 +1,8 @@
-import { findFingerings, findPositions } from "../dist/fretboard.js";
+import { chordShape, findFingerings, findPositions, parseChordShape } from "../dist/fretboard.js";
 import { findPianoKeys, findPianoVoicings } from "../dist/piano.js";
 import { chordName, midiName, noteName, parseNotes, parseStringMidi, parseChord } from "../dist/theory.js";
-import { parseProgression, planGuitarSong, planPianoSong } from "../dist/song.js";
-import { chordShape, parseRiff, secondsPerBeat, stepName } from "../dist/riff.js";
+import { parseProgression, planGuitarSong, planPianoSong, rankGuitarVoicings } from "../dist/song.js";
+import { parseRiff, secondsPerBeat, stepName } from "../dist/riff.js";
 import { RiffTransport } from "../dist/transport.js";
 import { readFile } from "node:fs/promises";
 
@@ -603,10 +603,29 @@ throws(() => parseRiff("# only a comment", riffOpts), "empty riff throws");
 {
   const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
   const agents = await readFile(new URL("../AGENTS.md", import.meta.url), "utf8");
+  const riffPage = await readFile(new URL("../riff.html", import.meta.url), "utf8");
   const index = await readFile(new URL("../index.html", import.meta.url), "utf8");
 
-  const shipped = index.match(/<textarea id="riff-text"[^>]*>([\s\S]*?)<\/textarea>/);
-  check(shipped !== null, "index.html still carries a default riff notation");
+  const shipped = riffPage.match(/<textarea[\s\S]*?id="riff-text"[\s\S]*?>([\s\S]*?)<\/textarea\s*>/);
+  check(shipped !== null, "riff.html carries a default riff notation");
+  // The riff trainer is its own page now, so the finder must not grow it back.
+  check(!/id="riff-text"/.test(index), "index.html does not carry the riff notation box");
+  check(/riff\.html/.test(index), "index.html links to the riff builder");
+  check(
+    !/value="riff"/.test(index) && !/id="desc-riff"/.test(index),
+    "index.html has no riff mode left in it",
+  );
+  check(
+    /href="\.\/style\.css"/.test(riffPage) && /src="\.\/dist\/riff-main\.js"/.test(riffPage),
+    "riff.html is wired to the shared stylesheet and its own entry module",
+  );
+  // The Pages workflow copies files by name, so a page that is not in the list
+  // is a 404 on the live site and nothing local would ever notice.
+  const workflow = await readFile(new URL("../.github/workflows/pages.yml", import.meta.url), "utf8");
+  check(
+    /cp index\.html riff\.html style\.css _site\//.test(workflow),
+    "the Pages workflow copies riff.html (otherwise the live riff builder 404s)",
+  );
   if (shipped) {
     const text = shipped[1].replace(/^\s*\n/, "").replace(/\s+$/, "");
     try {
@@ -666,7 +685,7 @@ throws(() => parseRiff("# only a comment", riffOpts), "empty riff throws");
     const norm = (t) => t.replace(/^\s*\n/, "").replace(/\s+$/, "");
     check(
       norm(embedded[1]) === norm(shipped[1]),
-      "riff-debug.html and index.html agree on the default notation",
+      "riff-debug.html and riff.html agree on the default notation",
     );
   }
 
@@ -691,6 +710,92 @@ throws(() => parseRiff("# only a comment", riffOpts), "empty riff throws");
   }
 }
 
+// ---- The voicing browser: pins are commands, the search is only a default. ----
+{
+  const riffOpts = { tuning: STANDARD, maxFrets: 24, span: 5, cap: 400 };
+
+  // A pin is exactly the frets the user picked, and the search cannot override it.
+  const pinned = parseRiff("C Am", { ...riffOpts, pins: [{ name: "C", shape: "x32010" }] });
+  check(chordShape(pinned.events[0].frets) === "x32010", "a pinned chord plays exactly the pinned shape");
+  check(pinned.events[0].pinned === true, "a pinned chord is flagged as pinned");
+  check(pinned.events[1].pinned === false, "an unpinned chord in the same stream is not flagged");
+  check(
+    chordShape(pinned.events[1].frets) !== chordShape(parseRiff("C Am", riffOpts).events[1].frets),
+    "pinning a chord re-optimizes the chords AFTER it around the new shape",
+  );
+
+  // Pins are index-aligned with the chord stream, so an edit that changes which
+  // chord sits under a pin must drop it rather than re-voice a different chord.
+  const stale = parseRiff("C Am", { ...riffOpts, pins: [{ name: "Am", shape: "x02210" }] });
+  check(stale.events[0].pinned === false, "a pin whose chord name moved is ignored, not applied to the wrong chord");
+  check(chordShape(stale.events[0].frets) === chordShape(parseRiff("C Am", riffOpts).events[0].frets),
+    "an ignored pin leaves the auto voicing exactly as it was");
+
+  // A pin that cannot be honored is a hard, legible error — not a silent
+  // fallback to auto, which would leave the user hearing a shape they did not pick.
+  let threw = null;
+  try { parseRiff("C", { ...riffOpts, pins: [{ name: "C", shape: "xX201x" }] }); } catch (e) { threw = e.message; }
+  check(threw !== null && /not a shape/.test(threw), `a malformed pinned shape is refused (${threw})`);
+  threw = null;
+  try { parseRiff("C", { ...riffOpts, pins: [{ name: "C", shape: "x9x9x9" }] }); } catch (e) { threw = e.message; }
+  check(threw !== null && /within 5 frets/.test(threw), `a shape outside the span is refused (${threw})`);
+
+  // parseChordShape round-trips, and rejects what a shape cannot be.
+  check(JSON.stringify(parseChordShape("x32010")) === JSON.stringify([null, 3, 2, 0, 1, 0]), "parseChordShape reads a printed shape low string first");
+  check(parseChordShape("xxxxxx") === null, "a shape with nothing sounding is not a shape");
+  check(parseChordShape("x3201") === null, "a five-character shape is not a shape");
+  check(parseChordShape("x320100") === null, "a seven-character shape is not a shape");
+
+  // The browse list is the search's own candidate set, ordered by movement.
+  const ranked = rankGuitarVoicings(parseProgression("Am")[0].pitchClasses, STANDARD, 24, 5, [null, 3, 2, 0, 1, 0]);
+  check(ranked.length > 0, `the browser has candidates to walk (${ranked.length})`);
+  check(
+    ranked.every((entry, i) => i === 0 || ranked[i - 1].cost <= entry.cost),
+    "the browse list is ordered by how little the hand moves",
+  );
+  const shapes = new Set(ranked.map((entry) => entry.shape));
+  check(shapes.size === ranked.length, "the browse list has no duplicate shapes");
+  check(
+    ranked.slice(0, 5).some((entry) => entry.shape === "x02210"),
+    `the classic open Am is reachable near the top of the list (top 5: ${ranked.slice(0, 5).map((e) => e.shape).join(" ")})`,
+  );
+  // Every step the browser offers must be a shape the search itself would have
+  // considered, or stepping could land on something the plan can never play.
+  const candidateShapes = new Set(
+    findFingerings(parseProgression("Am")[0].pitchClasses, STANDARD, 24, 5, 400).fingerings.map((f) => chordShape(f.frets)),
+  );
+  check(
+    ranked.every((entry) => candidateShapes.has(entry.shape)),
+    "every browsable voicing is one the voicing search would have considered",
+  );
+  check(
+    ranked[0].cost <= 6,
+    `the top of the list is genuinely close to the previous chord (cost ${ranked[0].cost} from x32010)`,
+  );
+  // With no previous chord every candidate costs the same, so the order comes
+  // down to the tie-break. It has to lead with the shapes a guitarist reaches
+  // for, or the browse list is alphabetical noise — and the search's own pick
+  // then sits at an arbitrary rank like 350 of 400, with ◀ ▶ walking deeper
+  // into the same thin tail instead of toward better shapes.
+  const cold = rankGuitarVoicings(parseProgression("C")[0].pitchClasses, STANDARD, 24, 5, null);
+  check(
+    cold[0].sounded === 6 && cold[0].shape === "032010",
+    `a chord with no predecessor leads with the classic open shape (${cold[0].shape}, ${cold[0].sounded} strings)`,
+  );
+  check(
+    cold.every((entry, i) => i === 0 || cold[i - 1].sounded >= entry.sounded),
+    "the cold list never gains strings as it goes (fuller first)",
+  );
+  check(
+    cold[0].top <= cold[cold.length - 1].top,
+    `the cold list starts low on the neck (top fret ${cold[0].top} first, ${cold[cold.length - 1].top} last)`,
+  );
+  check(
+    cold.findIndex((entry) => entry.shape === "xx201x") > 0,
+    "the search's own thin pick is NOT first in the browse list (that is the point of the builder)",
+  );
+}
+
 // ---- The app must act on what is in the notation box. ----
 // The parser is covered above; this is a source check on the wiring, because
 // the failure it guards is a SILENT one. The box used to have no `input`
@@ -699,19 +804,28 @@ throws(() => parseRiff("# only a comment", riffOpts), "empty riff throws");
 // without a sound or a message. Neither shows up in an audio assertion, so
 // assert the wiring exists.
 {
-  const main = await readFile(new URL("../src/main.ts", import.meta.url), "utf8");
+  const entry = await readFile(new URL("../src/riff-main.ts", import.meta.url), "utf8");
   check(
-    /riffText\.addEventListener\("input"/.test(main),
+    /text\.addEventListener\("input"/.test(entry),
     "the riff notation box re-plans as you type (input listener present)",
   );
   check(
-    /RIFF_EDIT_MS/.test(main),
+    /RIFF_EDIT_MS/.test(entry),
     "the re-plan is debounced (a re-voice per keystroke is wasted work)",
   );
-  const start = main.slice(main.indexOf("function startRiff"));
+  // The invariant is "the plan is rebuilt before the transport that plays it",
+  // not "before some other call" — assert the two in order rather than pinning
+  // the check to whatever else happens to sit between them.
+  const start = entry.slice(entry.indexOf("function start()"), entry.indexOf("playButton.addEventListener"));
+  const refreshed = start.indexOf("refresh()");
+  const built = start.indexOf("new RiffTransport");
   check(
-    /refreshRiff\(\)/.test(start.slice(0, start.indexOf("primeAudio"))),
+    refreshed >= 0 && built >= 0 && refreshed < built,
     "Play re-plans before playing, so it can never play a stale plan",
+  );
+  check(
+    /stop\(\)/.test(entry.slice(entry.indexOf('text.addEventListener("input"'))),
+    "editing the notation stops playback (a redrawn timeline must not argue with a ringing loop)",
   );
 }
 

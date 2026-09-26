@@ -1,4 +1,4 @@
-import { planGuitarSong } from "./song.js";
+import { planGuitarSong, type VoicingPin } from "./song.js";
 import { parseChord, type ParsedChord } from "./theory.js";
 
 /**
@@ -34,6 +34,8 @@ export interface RiffEvent {
   kind: "chord" | "note";
   /** The written chord, for chord-stream events. */
   chord: ParsedChord | null;
+  /** True when the shape came from a user pin rather than the search. */
+  pinned?: boolean;
 }
 
 export interface Riff {
@@ -61,6 +63,12 @@ export interface RiffOptions {
   cap: number;
   /** Strum width in ms when the notation has no `strum` directive. */
   defaultStrumMs?: number;
+  /**
+   * User-chosen voicings, index-aligned with the chord stream. A pin whose
+   * `name` is not the chord at that index is ignored, so editing the progression
+   * cannot leave a choice silently re-voicing a different chord.
+   */
+  pins?: VoicingPin[];
 }
 
 const STRING_LETTERS = "eBGDAE";
@@ -71,18 +79,6 @@ const LANE_LINE = /^\s*([eBGDAE])\s*\|([^|]*)\|\s*$/;
 /** A lane that opens with a string letter + `|` but never closes its pipe. */
 const UNCLOSED_LANE = /^\s*[eBGDAE]\s*\|/;
 const MUTE_CHARS = new Set(["x", "X"]);
-
-/**
- * A fingering as printed chord-shape text, low string first: `xx201x`. This is
- * the tab for an auto-voiced chord, and it is the thing the notation box cannot
- * show — the box says `C`, one character, and the shape was chosen by the
- * voicing DP. It was computed all along (a chord cannot sound without it) and
- * drawn in the timeline, but neither is where you look when you are reading a
- * progression, and a voicing you cannot see is a voicing you cannot check.
- */
-export function chordShape(frets: (number | null)[]): string {
-  return frets.map((fret) => (fret === null ? "x" : String(fret))).join("");
-}
 
 /**
  * How long one tab column lasts, in beats. `step 0.5` is a number of BEATS,
@@ -350,7 +346,8 @@ export function parseRiff(text: string, options: RiffOptions): Riff {
         throw new Error(`Chord "${token}": ${e instanceof Error ? e.message : String(e)}`);
       }
     });
-    const plan = planGuitarSong(parsed, options.tuning, options.maxFrets, options.span, options.cap);
+    const pins = options.pins ?? [];
+    const plan = planGuitarSong(parsed, options.tuning, options.maxFrets, options.span, options.cap, pins);
     if (!plan || plan.kind !== "guitar") {
       throw new Error("A chord in the stream has no voicing within the chosen fret span.");
     }
@@ -370,6 +367,7 @@ export function parseRiff(text: string, options: RiffOptions): Riff {
         label: entry.chord.name,
         kind: "chord",
         chord: entry.chord,
+        pinned: pins[index]?.name === entry.chord.name,
       });
     });
   }

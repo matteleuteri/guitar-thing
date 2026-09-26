@@ -1,6 +1,7 @@
 import { playFrettedNote, playNotes, playVoicing } from "./audio.js";
 import { findPositions, type Fingering } from "./fretboard.js";
-import { chordShape, type RiffEvent } from "./riff.js";
+import { chordShape } from "./fretboard.js";
+import type { RiffEvent } from "./riff.js";
 import { midiName, SEMITONES } from "./theory.js";
 
 /** Create an element with an optional class and text content. */

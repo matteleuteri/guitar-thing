@@ -51,7 +51,7 @@
 load, so give it a second after a fresh reload before judging anything.</pre>
 
   <h2>1 · The default riff, exactly as shipped</h2>
-  <p class="hint">The textarea default from <code>index.html</code>: a C&thinsp;Am&thinsp;F&thinsp;G chord line plus an 8-note melody, 96&nbsp;bpm, strum 55&nbsp;ms, release 400&nbsp;ms, looping.</p>
+  <p class="hint">The textarea default from <code>riff.html</code>: a C&thinsp;Am&thinsp;F&thinsp;G chord line plus an 8-note melody, 96&nbsp;bpm, strum 55&nbsp;ms, release 400&nbsp;ms, looping.</p>
   <div class="row">
     <button id="playDefault">Play ▶</button>
     <button id="playDefaultOnce" class="stop">Stop</button>
@@ -118,7 +118,7 @@ load, so give it a second after a fresh reload before judging anything.</pre>
     const $ = (id) => document.getElementById(id);
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-    // The textarea default, copied from index.html so this page and the app
+    // The textarea default, copied from riff.html so this page and the app
     // cannot silently drift. scripts/smoke.mjs asserts both parse.
     const DEFAULT_TEXT = `tempo 96
 strum 55
