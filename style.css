@@ -51,6 +51,126 @@ header p { color: var(--muted); max-width: 70ch; margin-top: .25rem; }
   gap: .55rem;
 }
 
+#riff-only {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: .55rem .9rem;
+}
+#riff-only .field-wide { flex: 1 1 34rem; align-items: flex-start; }
+#riff-only .field-wide label { padding-top: .35rem; }
+#riff-text {
+  flex: 1;
+  min-width: 18rem;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: .82rem;
+  line-height: 1.45;
+  padding: .5rem .6rem;
+  border-radius: 6px;
+  border: 1px solid var(--line, #33465c);
+  background: #0a1119;
+  color: inherit;
+  resize: vertical;
+  tab-size: 4;
+}
+#riff-scale, #riff-loop-start, #riff-loop-end { width: 4.5rem; }
+.riff-transport { display: inline-flex; gap: .35rem; }
+
+/* Riff timeline: one row per string, notes positioned by beat. The grid is a
+   left gutter (string letter) + a track; the track's own background is a
+   repeating gradient so bars and steps line up without extra elements. */
+.riff-timeline {
+  position: relative;
+  --riff-gutter: 1.4rem;
+  --riff-step: 1.5rem;
+  padding: .3rem 0;
+  overflow-x: auto;
+}
+.riff-ruler, .riff-row {
+  display: flex;
+  align-items: center;
+  position: relative;
+  z-index: 1;
+}
+.riff-corner, .riff-stringlabel {
+  flex: 0 0 var(--riff-gutter);
+  font-family: ui-monospace, monospace;
+  font-size: .7rem;
+  color: var(--muted);
+  text-align: center;
+}
+.riff-bar-track, .riff-track {
+  position: relative;
+  flex: 1 0 auto;
+  width: calc(var(--riff-cols) * var(--riff-step));
+}
+.riff-track {
+  height: 1.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, .05);
+  background:
+    repeating-linear-gradient(
+      to right,
+      rgba(255, 255, 255, .07) 0 1px,
+      transparent 1px var(--riff-step)
+    );
+}
+.riff-bar {
+  position: absolute;
+  left: calc(var(--riff-bar-start) * var(--riff-step));
+  top: 0;
+  font-family: ui-monospace, monospace;
+  font-size: .65rem;
+  color: var(--muted);
+  padding-left: 2px;
+}
+.riff-loop {
+  position: absolute;
+  top: 1.1rem;
+  bottom: .3rem;
+  left: calc(var(--riff-gutter) + var(--riff-cols) * var(--riff-step) * var(--riff-loop-a, 0));
+  width: calc(var(--riff-cols) * var(--riff-step) * (var(--riff-loop-b, 0) - var(--riff-loop-a, 0)));
+  background: rgba(76, 194, 255, .07);
+  border-left: 1px solid rgba(76, 194, 255, .35);
+  border-right: 1px solid rgba(76, 194, 255, .35);
+  z-index: 0;
+}
+.riff-note {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  gap: 1px;
+  z-index: 2;
+}
+.riff-fret {
+  min-width: 1.15rem;
+  padding: 0 .15rem;
+  border-radius: 3px;
+  font-family: ui-monospace, monospace;
+  font-size: .68rem;
+  font-weight: 600;
+  text-align: center;
+  color: #06121c;
+  background: var(--muted);
+}
+.riff-clickable { cursor: pointer; }
+.riff-clickable:hover { filter: brightness(1.2); }
+.riff-chord .riff-fret { box-shadow: 0 0 0 1px rgba(0, 0, 0, .35); }
+.riff-playhead {
+  position: absolute;
+  top: 1.1rem;
+  bottom: .3rem;
+  width: 2px;
+  left: calc(var(--riff-gutter) + var(--riff-cols) * var(--riff-step) * var(--riff-head-frac, 0));
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(76, 194, 255, .8);
+  pointer-events: none;
+  z-index: 3;
+}
+.riff-warning { color: var(--error); font-size: .8rem; margin-bottom: .3rem; }
+.riff-hint { font-size: .78rem; margin-top: .5rem; }
+
 .field {
   display: flex;
   flex-direction: row;

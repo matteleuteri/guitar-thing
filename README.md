@@ -75,6 +75,34 @@ Each card shows the chord name (with "also …" aliases for ambiguous spellings 
 suggested finger numbers, barre notes, and the sounding notes. Piano voicings render as
 mini keyboards with the pressed keys filled in.
 
+### Riff mode (chords + tab)
+
+Switch **Mode** to *Riff* to type a chord stream and/or a tab lane and hear it
+played back on a loop, with a speed slider, loop bounds and a per-string
+timeline you can click to audition single events.
+
+```
+tempo 96        # tempo|bpm, bar, step, strum, release (directives, optional)
+bar 4           # beats per bar
+step 0.5        # beats per tab character column (0.5 = eighths)
+strum 55        # strum width in ms for multi-note events (0 = all at once)
+release 400     # note length in ms (0 or absent = let it ring)
+C Am F G        # chord line: one chord per bar (or `C|Am|F|G`)
+e|5---5---7---7---8---8---7---5---|
+B|----------------3---5---5---3---|
+G|--------------------------------|
+```
+
+A chord line and a tab lane can appear in the same document — they play
+together, so the chords are the accompaniment and the tab is the melody. Chord
+voicings are chosen automatically (the hand moves as little as possible), so
+the tab lane is the escape hatch when you want exact strings.
+
+Tab lanes are `e B G D A E` (high `e` first, as you read them); in each column
+`-` `.` `_` is a rest, `x` mutes, and a number is a fret (two digits occupy two
+columns). Frequencies come from the current tuning, so this works with a custom
+tuning too.
+
 ## Note selection
 
 Notes are picked from the grid of 12 pitch classes (shown with sharps). Click to
@@ -97,19 +125,27 @@ toggle; C·E·G is preselected. Duplicates aren't possible, order doesn't matter
 
 ## Tech
 
-Vanilla TypeScript → ES modules, no frameworks, zero runtime dependencies.
+Vanilla TypeScript → ES modules, no frameworks. The one runtime dependency is
+`smplr` (the sampled-guitar engine, vendored as `assets/smplr.mjs`); TypeScript
+is the only devDependency.
 
-**Sound.** Every note is a physically-modeled plucked string (`src/synth/pluck-worklet.ts`):
-the loop is seeded with a real pluck shape — a triangular displacement whose kink
-sits at the pick point (`pickPos`), so each string excites its own harmonics by
-construction — then rings through a fraction-of-a-sample delay, a two-stage bright/
-decay loop, a shared body EQ and a small room tail. Each guitar string has a fixed
-character (pickup-style EQ, attack, scrape brightness/length); the chord's root and
-color tones are accented systematically, with only a thin random humanizing sliver
-(detune, jitter) left over. Guitar chords strum treble → bass one string at a time
-(adjustable via the "Strum speed (ms)" field) and piano voicings roll ~8 ms so
-voices don't fuse. All of it is tunable from one config constant: `DEFAULT_CONFIG`
-in `src/synth/config.ts`.
+**Sound.** Guitar voicings play from a real, self-hosted GM kit through **smplr**
+(`src/synth/smplr.ts`): a steel kit by default plus a classical-nylon kit,
+selectable with the "Guitar sample" button. The kit is fetched and decoded once
+per context and shared by six per-string instruments, each on its own fixed
+stereo seat (low E left → high E right). Steel and nylon kits are auditionable
+in `/debug/audio-debug.html` along with two fallback engines — a recorded
+string bank and a physically-modeled Karplus–Strong string
+(`src/synth/pluck-worklet.ts`): its loop is seeded with a real pluck shape (a
+triangular displacement whose kink sits at the pick point, `pickPos`), then
+rings through a fractional-sample delay, a two-stage bright/decay loop, a shared
+body EQ and a small room tail. Each guitar string has a fixed character
+(pickup-style EQ, attack, scrape brightness/length); the chord's root and color
+tones are accented systematically, with only a thin random humanizing sliver
+(detune, jitter) left over. Guitar chords strum treble → bass one string at a
+time (adjustable via the "Strum speed (ms)" field, and per-event in Riff mode)
+and piano voicings roll ~8 ms so voices don't fuse. All of it is tunable from one
+config constant: `DEFAULT_CONFIG` in `src/synth/config.ts`.
 
 **Piano.** Keys ring apart by register: each key's character is interpolated from a
 dark/felted/long bass profile to a bright/snappy/short treble profile (`cfg.piano`).

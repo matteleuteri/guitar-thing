@@ -326,6 +326,26 @@ export class SmplrGuitarEngine {
     return { stop: () => inst.stop(stopId), timer: 0 };
   }
 
+  /**
+   * Damp one string `ms` after `at` by ramping its gate down — the note-off a
+   * riff needs (a kit note rings for seconds, so a run of notes piles into mush
+   * without it). The gate is ours and its automation is time-ordered, so a
+   * later `play` on the same string simply re-arms it after this release.
+   */
+  release(stringIndex: number, at: number, ms: number): void {
+    const gate = this.gates[stringIndex];
+    if (!gate || ms <= 0) return;
+    const start = at + Math.max(0.002, this.config.engine.attackMs / 1000);
+    const end = start + ms / 1000;
+    // `cancelAndHoldAtTime` keeps the level the note reached (so a release
+    // part-way through the attack doesn't click); fall back to the current
+    // value where it is unavailable.
+    const param = gate.gain;
+    if (typeof param.cancelAndHoldAtTime === "function") param.cancelAndHoldAtTime(start);
+    else param.setValueAtTime(param.value, start);
+    param.exponentialRampToValueAtTime(0.0001, end);
+  }
+
   /** Silence every string's instrument (used by `stopAudio`). */
   stopAll(): void {
     for (const inst of this.instruments) inst.stop();

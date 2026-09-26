@@ -114,6 +114,27 @@ function ensure(): Promise<void> {
 }
 
 /**
+ * The live context clock (0 until the first `ensure`). The riff transport needs
+ * it as its only time source — scheduling on `AudioContext.currentTime` is
+ * what makes a sequence land sample-accurate instead of on `setTimeout` jitter.
+ */
+export function audioNow(): number {
+  return context ? context.currentTime : 0;
+}
+
+/**
+ * Await the graph (and, bounded, the kit) before starting a sequenced play.
+ * The transport reads `audioNow()` to place events ahead of the playhead, so
+ * the context must exist AND be running before it starts counting — otherwise
+ * `currentTime` sits at 0 and every event lands in the past.
+ */
+export async function primeAudio(): Promise<void> {
+  await ensure();
+  await awaitKitIfLoading(8000);
+  if (context && context.state === "suspended") await context.resume().catch(() => undefined);
+}
+
+/**
  * Build the smplr guitar engine when the config wants it (fire-and-forget; the
  * kit decodes over a second or two and the first play may precede it). If the
  * engine throws at construction (bad kit path, offline-missing fetch) we log
@@ -593,8 +614,11 @@ function scheduleKitVoice(
   time: number,
   params: VoiceParams,
   config: PluckAudioConfig,
+  humanize = true,
 ): Voice {
-  const jitter = (Math.random() * config.micro.jitterMs) / 1000;
+  // `humanize` is off for a blocked chord (strumMs 0): "all at once" has to
+  // mean simultaneous, so the per-voice start jitter is dropped too.
+  const jitter = humanize ? (Math.random() * config.micro.jitterMs) / 1000 : 0;
   const start = time + jitter;
   const roles = config.roles;
   const velocity = Math.round(
@@ -653,9 +677,10 @@ function scheduleSampleVoice(
   params: VoiceParams,
   config: PluckAudioConfig,
   match: NearestMatch,
+  humanize = true,
 ): Voice {
   const { sample, shift } = match;
-  const jitter = (Math.random() * config.micro.jitterMs) / 1000;
+  const jitter = humanize ? (Math.random() * config.micro.jitterMs) / 1000 : 0;
   const start = time + jitter;
   const rate = Math.pow(2, shift / 12) * Math.pow(2, ((Math.random() * 2 - 1) * config.micro.detuneCents) / 1200);
   recordDebugEvent({
@@ -796,8 +821,26 @@ function keyPeak(params: {
   return (config.micro.peak * firstKeyBoost * (keyCount / 6) ** 0.5 + 0.06) * 0.9;
 }
 
+/**
+ * Per-play overrides. `when` is an absolute AudioContext time — the riff
+ * transport schedules whole events ahead of the playhead, which is only
+ * possible because the schedulers already take an absolute `baseTime`.
+ * `strumMs` makes the strum width a property of ONE event instead of a global
+ * config knob, so a progression can hard-strum a chord and arpeggiate the next.
+ */
+export interface PlayOptions {
+  when?: number;
+  strumMs?: number;
+  /** Damp each struck string this many ms after it sounds (0 = let it ring). */
+  releaseMs?: number;
+}
+
 /** Pluck every sounding string of a voicing (muted strings skipped). */
-export function playVoicing(frets: (number | null)[], tuning: number[]): void {
+export function playVoicing(
+  frets: (number | null)[],
+  tuning: number[],
+  options: PlayOptions = {},
+): void {
   const config = DEFAULT_CONFIG;
   schedule(async () => {
     await ensure();
@@ -807,7 +850,14 @@ export function playVoicing(frets: (number | null)[], tuning: number[]): void {
     // made the very first click of a session sound like the old engine. A
     // stuck/failed kit times out into today's fallback after 8s.
     await awaitKitIfLoading(8000);
-    scheduleGuitarVoicing(context, graph, frets, tuning, config, context.currentTime + NOTE_START);
+    if (!context || !graph) return;
+    const requested = options.when ?? context.currentTime + NOTE_START;
+    // Never schedule in the past: the transport's lookahead can be overtaken
+    // by a slow `schedule()` chain (a long kit wait), and a past `baseTime`
+    // would fire every note of the event at once.
+    const baseTime = Math.max(requested, context.currentTime + 0.005);
+    const strumMs = options.strumMs ?? config.strum.guitarMs;
+    scheduleGuitarVoicing(context, graph, frets, tuning, config, baseTime, true, strumMs, options.releaseMs);
   });
 }
 
@@ -850,9 +900,14 @@ function scheduleGuitarVoicing(
   config: PluckAudioConfig,
   baseTime: number,
   trackLive = true,
+  strumMs?: number,
+  releaseMs = 0,
 ): void {
-  const gap = config.strum.guitarMs / 1000;
-  const jitter = config.strum.jitterMs / 1000;
+  const gap = (strumMs ?? config.strum.guitarMs) / 1000;
+  // Jitter humanizes a strum, but `strumMs: 0` means "all at once" — a riff
+  // trainer's blocked chord must be exactly simultaneous, so the jitter is
+  // dropped rather than smearing the notes a few ms apart.
+  const jitter = gap > 0 ? config.strum.jitterMs / 1000 : 0;
   const soundingStrings = frets
     .map((fret, stringIndex) => ({ fret, stringIndex }))
     .filter((entry): entry is { fret: number; stringIndex: number } => entry.fret !== null);
@@ -924,12 +979,19 @@ function scheduleGuitarVoicing(
     // decoding) or can't cover the note (no sample within shift budget).
     const useKit = config.engine.mode === "smplr" && guitarEngine !== null && guitarEngineReady;
     const useSamples = match && !useKit && config.engine.mode !== "synth";
+    const humanize = gap > 0;
     const hit = useKit
-      ? scheduleKitVoice(guitarEngine!, midi, stringIndex, baseTime + Math.max(0, offset), params, config)
+      ? scheduleKitVoice(guitarEngine!, midi, stringIndex, baseTime + Math.max(0, offset), params, config, humanize)
       : useSamples && match
-        ? scheduleSampleVoice(context, graph, midi, baseTime + Math.max(0, offset), params, config, match)
+        ? scheduleSampleVoice(context, graph, midi, baseTime + Math.max(0, offset), params, config, match, humanize)
         : scheduleVoice(context, graph, midiToFreq(midi), baseTime + Math.max(0, offset), params, config);
     if (trackLive) live.add(hit);
+    // Note-off for the kit path. Only the kit has a gate we can damp on a
+    // schedule; the sample/synth voices ring out (the transport's `release`
+    // is a riff aid, and the kit is the default engine).
+    if (useKit && releaseMs > 0) {
+      guitarEngine!.release(stringIndex, baseTime + Math.max(0, offset), releaseMs);
+    }
   }
 }
 

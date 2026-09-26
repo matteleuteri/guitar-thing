@@ -26,21 +26,45 @@ A dependency-free browser app ("Note/Chord Finder") with two instrument modes:
 
 ## Current status (break point — read first)
 
-All approved audio work is merged into `main` (and pushed to `origin/main`):
-the physical string core (commuted triangle pluck at per-string `pickPos` →
-fractional-delay allpass → two-stage damping/`decay`), per-string scrape shape
-(`pickBright`/`pickDecayMs`) that separates onsets from the first sample, the
+**The product goal changed (Sep 2026): the app is now a riff/practice
+trainer.** The user already likes the pushed app and the debug tools, but what
+they actually want is to *tell the app what notes/chords to play, at what
+frequencies, and hear how a guitar riff sounds before learning it by hand* —
+including chords, sequential (not block) strumming, and a controllable speed.
+So the active work is **sequencing/notation**, not sound quality. The user asked
+for the uncommitted SF2 work to be re-evaluated rather than built on; verdict:
+it is parked (it fixes sample *source*, not the thing that was actually
+blocking). Everything on `main` stays as-is.
+
+**In flight: the riff trainer (uncommitted, `npm test` green).** A
+"Chord stream + tab lane" notation the user chose; see "Riff trainer" below for
+the full design. A first slice is landed: `src/riff.ts` (model + parser),
+`src/transport.ts` (lookahead scheduler), `when`/`strumMs`/`releaseMs` options
+on `playVoicing`, kit note release in `src/synth/smplr.ts`, a timeline in
+`src/render.ts`, and the Riff mode UI. **Not yet done:** any real-browser
+listen-through, notation for rhythm/duration, raw Hz/MIDI input, per-event
+strum overrides, a metronome/count-in, or finger-number/learning aids.
+
+**Audio baseline (unchanged, on `main`):** all approved audio work is merged
+into `main` (and pushed to `origin/main`): the physical string core (commuted
+triangle pluck at per-string `pickPos` → fractional-delay allpass → two-stage
+damping/`decay`), per-string scrape shape (`pickBright`/`pickDecayMs`), the
 song/progression mode, and — the current default sound — the **smplr sampled
 guitar kit** (progress 21), which the user ear-approved on the live site:
 guitar voicings play a real GM steel-guitar kit, and `ready: true` +
-`kind: "kit"` events confirm it. `dev-audio` and `song-mode` are merged
-ancestors kept for history. **Parked after user listening:** piano register
-identity (still reads as "one sound"), the *synthesized* convolutional body IR
-(beat/wobbled badly by ear twice and was reverted — a body is only worth
-retrying as a *recorded* IR), and the recorded-string sample bank (progress 20
-was verdicted "not sounding good" — superseded by the kit as the second engine).
-**Backlog (discuss before building):** the pitched pre-ring "slap" (the rest
-of Lead C), Lead D (spatialization), and the muted-string "thunk".
+`kind: "kit"` events confirm it. A second **classical-nylon** kit (progress 22)
+and a hardened debug harness (what-just-played readout, engine-aware
+comparison, `?selftest=1`) are also on `main`. `dev-audio` and `song-mode` are
+merged ancestors kept for history. **Parked after user listening:** piano
+register identity (still reads as "one sound"), the *synthesized* convolutional
+body IR (beat/wobbled badly by ear twice and was reverted), the recorded-string
+sample bank (progress 20 was verdicted "not sounding good" — the kit is now
+the second engine), and progress 23's sliced-kit pivot (the extractor exists and
+is verified against a synthetic bank, but no real `.sf2` is available, the
+preset intent was never written down, and redistribution licensing is
+unresolved — **do not build on it** unless the user asks for sample quality
+again). **Backlog (discuss before building):** the pitched pre-ring "slap" (the
+rest of Lead C), Lead D (spatialization), and the muted-string "thunk".
 
 **Big pivot — smplr sampled guitar (progress 21).** Ear-check of the six
 recorded-string setups (progress 20) landed as "just not sounding good" — the
@@ -137,10 +161,82 @@ from the local `dist/` (that folder is gitignored). CI owns it:
   audio catables (`assets/guitar-steel-ogg.js`, `assets/smplr.mjs`) ship the
   same way — see the Audio section below.
 
+## Riff trainer (the active work)
+
+The user's goal: type what they want to hear, hear it, then learn it by hand.
+**One model covers chords and riffs** — an event is a set of notes with a start
+beat and a *strum width*, so a block chord is width `0`, a strum/arpeggio is a
+positive width, and a riff is a run of one-note events. Song mode is just the
+degenerate case (one event per bar, fixed width). Don't build a second
+"riff mode" concept; extend `RiffEvent`.
+
+**Notation — "chord stream + tab lane"** (the user's choice, over free note
+names, a chord sheet, or MIDI import). `parseRiff(text, options)` in
+`src/riff.ts` returns a `Riff`; both notations may appear in one document and
+their events are **unioned on one beat grid** (a chord line and a tab lane at
+the same beat both play — deliberately additive):
+
+```
+tempo 96        # directives: tempo|bpm, bar, step, strum, release
+bar 4           # beats per bar (default 4)
+step 0.5        # beats per tab character column (default 0.5 = eighths)
+strum 55        # default strum width ms for multi-note events (0 = blocked)
+release 400     # note length ms; 0/absent = let ring
+C Am F G        # a chord line: one chord per bar, spaced or `C|Am|F|G`
+e|5---5---7---7---8---8---7---5---|
+B|----------------3---5---5---3---|
+G|--------------------------------|
+```
+
+Tab rules: lanes are `e`, `B`, `G`, `D`, `A`, `E` (index 0 = **low E**, the
+`STRING_LETTERS = "eBGDAE"` order reversed for reading); a character column is
+one step. `-`/`.`/`_` = rest, `x` = mute, 1–2 digit frets (a 2-digit fret
+occupies two character positions), and `'`/`?`/`b`/`h`/`p`/`~`/`*` are accepted
+as articulation marks but **currently ignored** — don't treat them as a feature.
+Chord voicings reuse `planGuitarSong`'s DP so the hand moves as little as
+possible; tab events are the explicit-string escape hatch. Note names are
+resolved to *frequencies* via `tuning[stringIndex] + fret`; there is no raw
+Hz/MIDI input yet.
+
+**Timing.** `src/transport.ts`'s `RiffTransport` is a lookahead scheduler
+(25 ms tick, 0.3 s horizon) that books every note on `AudioContext.currentTime`
+— **not** `setTimeout`, which is what made the old song mode jittery. It takes an
+injected clock + `TransportTicker` purely so `scripts/smoke.mjs` can drive it
+deterministically. The loop is **half-open** `[start, end)` so a loop boundary
+never double-fires or drops an event, and the loop period is computed from the
+*scheduled* end (not the wall clock) so long loops don't drift. Per-event
+`strumMs`/`releaseMs` ride on `playVoicing(frets, tuning, { when, strumMs,
+releaseMs })`, which clamps a past `when` forward and keeps the old 2-arg
+signature working.
+
+**Two audio gotchas the transport exposed (both now regression-tested in
+`scripts/audio-sched.mjs`).** `strumMs: 0` means "all at once", so *both* the
+strum jitter and the per-voice `micro.jitterMs` are suppressed when the width
+is 0 — otherwise a "blocked" chord smears a few ms and a riff trainer that lies
+about simultaneity is useless. And `releaseMs` is **kit-only** today: it ramps
+the smplr per-string gate down, while the sample/synth fallbacks still ring out.
+
+**The notation we ship is parse-tested.** `scripts/smoke.mjs` reads the Riff
+textarea out of `index.html` and every fenced tab example out of `README.md` and
+this file, and asserts each one parses with no warnings. A tab lane's length is
+its character count, so a hand-edited example silently breaks the *app's own
+default* (it once shipped 26- vs 29-column lanes, and a fresh Riff page opened
+on a "lanes have different lengths" error). When you touch a notation example,
+`npm test` is the check — don't eyeball the columns. Related: a comment marker
+only opens a comment at the **start** of a token, so `C Am F#m7 Bb7 # cadence`
+keeps all four chords; a mid-token `#` is a sharp.
+
+`src/render.ts`'s `renderRiffTimeline` is a per-string grid whose track width is
+`--riff-cols * --riff-step`; a note's `left: %` is therefore exact, and the
+loop region + playhead add `--riff-gutter` to measure from the same origin. Keep
+those three in step — a note at `left: 0%` and a playhead at `0` must land on the
+same pixel.
+
 ## Structure
 
 - `index.html`, `style.css` — single page, dark theme. CSS class prefixes: `fb-`
-  (fretboard positions), `cd-` (chord diagram), `.diagrams`, `.chord-card`.
+  (fretboard positions), `cd-` (chord diagram), `riff-` (riff timeline),
+  `.diagrams`, `.chord-card`.
 - `src/theory.ts` — pitch classes, parsing, tunings, chord-name identification.
 - `src/fretboard.ts` — `findPositions` + `findFingerings` (guitar core algorithm).
 - `src/piano.ts` — `findPianoKeys` + `findPianoVoicings` (piano core algorithm).
@@ -196,7 +292,11 @@ from the local `dist/` (that folder is gitignored). CI owns it:
   on load, so a code change to the import repairs existing captures without
   re-recording. No shipped fallback bank: the recorded bank was verdicted "not
   sounding good", so a fresh origin plays the K–S synth instead.
-- `src/main.ts` — UI wiring, form handling, guitar/piano orchestration (entry point).
+- `src/riff.ts` — riff-trainer model (`Riff`, `RiffEvent`) + the "chord stream
+  + tab lane" parser. See "Riff trainer" above.
+- `src/transport.ts` — `RiffTransport`, the lookahead scheduler behind Riff mode
+  playback (injected clock/ticker so the smoke test can drive it).
+- `src/main.ts` — UI wiring, form handling, guitar/piano/riff orchestration (entry point).
 - `scripts/smoke.mjs` — Node checks of the compiled theory/fingering output.
 - `scripts/audio-sched.mjs` — Node checks of the compiled audio *scheduling* graph
   (stubbed Web Audio): every voice must be silent from t=0 until its strum slot,
@@ -570,6 +670,22 @@ Both `dev-audio` and `song-mode` remain as offline history only.
 
 ## Backlog / ideas (discuss with the user before building)
 
+- **The sliced-kit pivot (IN FLIGHT — phase A landed, uncommitted).** See
+  "progress 23" at the bottom of this file for the full write-up. In one line:
+  the shipped smplr kits decode **all 88 notes (A0..C8, 2.6 MB) on every page
+  load**, but the guitar can only sound **MIDI 40..88** at frets 0..24 — so
+  over half the download + decode budget is notes the instrument can never
+  play. Phase A is an offline extractor (`scripts/sf2-extract.mjs`) that
+  compiles a high-quality open SoundFont (the plan named **MuseScore General**,
+  steel-string preset) down to per-note WAVs at exact pitch with velocity
+  brightness baked in. **Status: the extractor works and is verified against a
+  synthetic bank, but it has NEVER been run on a real .sf2 — no bank is on
+  this machine, and the preset/plan was never written down before the session
+  that started it ended. Confirm the intent and get the bank before going
+  further.** Open questions for the user: (a) is the motive size/load-time,
+  source quality, or both? (b) which bank + which steel/nylon preset? (c) does
+  smplr stay, or does the app play the pre-sliced buffers directly (a
+  pre-sliced set needs no SF2 interpreter)?
 - ~~**Smarter per-note sound inside a chord.**~~ **Done** — see progress entry 7:
   `voices[]` per-string character + `roles.*` (root vs color) + hand-shaped
   `strum.pattern`, agreed as "String + role + strum, pronounced separation"
@@ -863,7 +979,75 @@ box." The playback side is now a `ConvolverNode` fed by a real recorded IR:
     (88 notes + OggS each) and asserts the switch decodes the new kit once and
     reuses the cache when flipping back. **Do:** A/B steel vs nylon on chord +
     single strings in the harness and the main page.
-    The kit gain/attack/velocity knobs live in `config.engine`.
+     The kit gain/attack/velocity knobs live in `config.engine`.
+23. **The sliced-kit pivot — Phase A (the SF2 extractor). Code landed,
+    UNCOMMITTED; never run on a real bank.** The steel and nylon kits are
+    approved and shipped, but both are a whole 88-note GM kit (A0..C8, 2.6 MB
+    steel / 2.1 MB nylon) downloaded and `decodeAudioData`-decoded in full on
+    **every page load** — `main.ts` calls `preloadGuitarEngine()` on
+    `DOMContentLoaded`. The guitar is capped at 24 frets (`index.html`), so in
+    standard tuning it can only ever sound **MIDI 40..88 = 49 of those 88
+    notes**. Over half the bytes and the decode work are for pitches the
+    instrument cannot produce. The idea: stop shipping a full kit, and
+    *compile* a purpose-built one offline out of a high-quality open
+    SoundFont — covering only the reachable range, already resampled to exact
+    pitch, with the velocity→brightness response baked into a few static
+    layers (a sliced WAV cannot evaluate SF2 modulators at runtime, so the
+    extractor's job is to bake them). This is the same "consistency of the
+    source" lesson as progress 20→21, sourced from a studio library rather
+    than a laptop mic. `scripts/sf2-extract.mjs` is that offline tool
+    (Node-only, never imported by the app, output to the gitignored
+    `scratch/`).
+    **What the extractor does:** reads the RIFF/sdta/pdta chunks, resolves
+    preset zones (whose `sampleID` names an *instrument*) × instrument zones
+    (whose `sampleID` names a *sample*) into playable regions with merged
+    generator sets, picks the region covering each (key, velocity), and
+    renders a one-shot mono WAV resampled to the exact target pitch, once per
+    velocity layer. The DSP (`resampleLinear` / `lowpassOnePole` /
+    `attackFade` / `normalizePeak` / `encodeWavMono`) is **imported from the
+    app's compiled `dist/synth/ir.js`** rather than reimplemented, so the baked
+    filter is provably the same code the app uses; run `npm run build` first.
+    A one-shot ends at the sample's **loop end** (the natural "one strum"
+    length), with a 2 ms attack fade and a 12 ms tail fade.
+    **SF2 gotchas that each cost real debugging time (all fixed, all silent
+    when wrong — every one produced a plausible-looking wrong answer):**
+    - A top-level LIST chunk's id is always `"LIST"`; the type (`pdta`,
+      `sdta`) is the 4 bytes *inside* it. Matching `c.id === "pdta"` never
+      fires and the bank reports "no pdta LIST". Relatedly, the sub-chunk
+      walk must start at `listStart + 4` (past the type field), not at
+      `listStart` — otherwise it reads `"pdta"` as a sub-chunk id and the
+      whole list parses as garbage. And `sdta`'s sub-chunks must be
+      enumerated too, or `smpl` is never set ("no smpl chunk").
+    - `wBagNdx` is an entry's **first** bag, and the entry owns every bag up
+      to the **next entry's** first bag (the trailing EOP/EOI record marks the
+      end of the table). Bounding the walk with `bag + 1` stops at the entry's
+      *second* bag and silently drops most of its zones.
+    - A zone's `startAddrs`/`endAddrs` are **relative to the sample header's
+      `dwStart`**, while the header's loop points are absolute `smpl` offsets.
+      Treating them as the same frame of reference empties every zone that
+      redefines its bounds. Those two generators are also **unsigned** (they
+      are 16-bit frame offsets, so a bank cannot address past 65535 frames via
+      them) while every other generator is signed — read a 44100-frame end as
+      signed and you get a negative offset.
+    - `buf` must stay a Node `Buffer`: the record readers index it (like a
+      `Uint8Array`) *and* call `readInt16LE`/`readInt8`, which only exist on
+      `Buffer`. Passing `.buffer` (an `ArrayBuffer`) reads `undefined` and
+      reports "not a RIFF file" on a perfectly good bank.
+    - `this.readPhdr`/`this.readShdr` passed as bare method references lose
+      `this`, so their `this.cstr(...)` call throws.
+    **Verified** against a synthetic bank built to exercise exactly these
+    paths (velocity-split zones, a zone-defined sub-range, a global zone, a
+    partial range): zone selection picks the right sample per velocity, a
+    relative zone range yields the right length, and pitch is exact — the six
+    open strings come out at 1.44 s (E2) → 0.36 s (E4), exactly the 24-semitone
+    4× ratio. The baked brightness is a *gentle* tilt, as a one-pole should
+    be: the quiet layer's 2nd partial comes out −8 dB down, matching
+    `1/sqrt(1+(523/256)²)` for the 256 Hz cutoff the modulator computes.
+    **Still to do:** acquire a bank (none is on this machine), find the steel
+    and nylon preset numbers, audition the six-note slice by ear, then widen
+    to the full 40..88 range. Decide whether smplr stays at all — a pre-sliced
+    WAV set has no SF2 left to interpret, so `Instrument`/`Soundfont` may be
+    replaceable by direct `AudioBufferSourceNode` playback.
 - **Attack/transient redesign.** Slices 1–2 landed — see progress 14 and 18:
   each string's scrape carries its own brightness (`pickBright`) and length
   (`pickDecayMs`), and the onset now "blooms" (bright + touch louder) then

@@ -18,6 +18,11 @@
       Give it a chord progression: it picks one voicing per chord and chains them so the whole
       song shifts as little as possible, highlighting the notes you can keep held as it changes.
     </p>
+    <p id="desc-riff" hidden>
+      Describe a riff and hear it back before you learn it. A chord stream plays one strummed
+      chord per bar; a tab lane plays single notes on the beats you write. Every event is
+      staggered by the strum width, so a block chord is a strum of 0 and an arpeggio is a wide one.
+    </p>
   </header>
 
   <section id="controls">
@@ -31,6 +36,7 @@
         <select id="mode">
           <option value="chord">Chord</option>
           <option value="song">Song</option>
+          <option value="riff">Riff</option>
         </select>
       </div>
       <div id="song-only" hidden>
@@ -80,6 +86,38 @@
         <div class="field">
           <label for="key-size">Key size (rem)</label>
           <input id="key-size" type="number" min="1.5" max="6" step="0.2" value="3" />
+        </div>
+      </div>
+      <div id="riff-only" hidden>
+        <div class="field field-wide">
+          <label for="riff-text">Riff</label>
+          <textarea id="riff-text" rows="9" spellcheck="false" title="Chord stream and/or tab lanes. Directives: tempo, bar, step, strum, release.">tempo 96
+strum 55
+release 400
+C Am F G
+e|5---5---7---7---8---8---7---5---|
+B|----------------3---5---5---3---|
+G|--------------------------------|
+</textarea>
+        </div>
+        <div class="field">
+          <label for="riff-scale">Speed (%)</label>
+          <input id="riff-scale" type="number" min="25" max="200" step="5" value="100" title="Playback tempo as a percentage of the written tempo, for learning a riff slowly" />
+        </div>
+        <div class="field">
+          <label for="riff-loop-start">Loop from bar</label>
+          <input id="riff-loop-start" type="number" min="1" max="64" step="1" value="1" />
+        </div>
+        <div class="field">
+          <label for="riff-loop-end">Loop to bar</label>
+          <input id="riff-loop-end" type="number" min="1" max="64" step="1" value="2" />
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <span class="riff-transport">
+            <button id="riff-play" type="button">Play ▶</button>
+            <button id="riff-stop" type="button">Stop</button>
+          </span>
         </div>
       </div>
       <div class="field">

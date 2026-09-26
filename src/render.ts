@@ -1,5 +1,6 @@
 import { playNotes, playVoicing } from "./audio.js";
 import { findPositions, type Fingering } from "./fretboard.js";
+import type { RiffEvent } from "./riff.js";
 import { midiName, SEMITONES } from "./theory.js";
 
 /** Create an element with an optional class and text content. */
@@ -301,4 +302,109 @@ export function renderChordDiagram(
 
   if (mutedCount(frets) > 0) box.title = "muted strings: ×";
   return box;
+}
+/* ------------------------------------------------------------------ */
+/* Riff timeline                                                        */
+/* ------------------------------------------------------------------ */
+
+const STRING_LETTERS = "eBGDAE";
+
+export interface RiffTimelineOptions {
+  tuning: number[];
+  /** Click a note group to hear just that event. */
+  onPlayEvent?: (index: number) => void;
+  /** Loop window, drawn as a highlighted region. */
+  loop?: { start: number; end: number } | null;
+}
+
+/**
+ * The riff as a per-string grid: one row per string, one column per `step`, so
+ * a run of single notes and a stack of chord notes read the same way. The
+ * playhead is a separate absolutely-positioned element the transport moves, so
+ * redrawing is never needed during playback.
+ */
+export function renderRiffTimeline(
+  events: RiffEvent[],
+  beatsPerBar: number,
+  stepBeats: number,
+  totalBeats: number,
+  options: RiffTimelineOptions,
+): HTMLElement {
+  const { tuning } = options;
+  const box = el("div", "riff-timeline");
+  const stringCount = tuning.length;
+  // One column per step; the final column carries the bar that starts there so
+  // a long riff still gets a sensible width.
+  const stepCount = Math.max(1, Math.ceil(totalBeats / stepBeats));
+  box.style.setProperty("--riff-cols", String(stepCount));
+
+  // Bar ruler.
+  const ruler = el("div", "riff-ruler");
+  const spacer = el("div", "riff-corner");
+  ruler.appendChild(spacer);
+  const barTrack = el("div", "riff-bar-track");
+  for (let bar = 0; bar * beatsPerBar < totalBeats; bar++) {
+    const cell = el("div", "riff-bar", String(bar + 1));
+    cell.style.setProperty("--riff-bar-start", String((bar * beatsPerBar) / stepBeats));
+    barTrack.appendChild(cell);
+  }
+  ruler.appendChild(barTrack);
+  box.appendChild(ruler);
+
+  // Loop region, drawn behind the notes. Positions are fractions handed to CSS
+  // as custom properties so the gutter is accounted for exactly (a plain
+  // percentage would measure from the container, not from the track).
+  if (options.loop) {
+    const region = el("div", "riff-loop");
+    region.style.setProperty("--riff-loop-a", String(options.loop.start / totalBeats));
+    region.style.setProperty("--riff-loop-b", String(options.loop.end / totalBeats));
+    box.appendChild(region);
+  }
+
+  // One row per string, high E first, like reading tab.
+  for (let stringIndex = stringCount - 1; stringIndex >= 0; stringIndex--) {
+    const row = el("div", "riff-row");
+    row.appendChild(el("div", "riff-stringlabel", STRING_LETTERS[stringCount - 1 - stringIndex]));
+    // The track's own repeating gradient draws the step gridlines and its
+    // width is the full step grid, so a note's `left: %` lands exactly on its
+    // beat — no per-step children needed.
+    row.appendChild(el("div", "riff-track"));
+    box.appendChild(row);
+  }
+
+  // Notes, placed on their string's row at their step.
+  const tracks = box.querySelectorAll<HTMLElement>(".riff-track");
+  events.forEach((event, index) => {
+    const step = Math.round(event.beat / stepBeats);
+    const group = el("div", event.notes.length > 1 ? "riff-note riff-chord" : "riff-note");
+    group.style.left = `${(step / stepCount) * 100}%`;
+    group.title = `${event.label} — bar ${Math.floor(event.beat / beatsPerBar) + 1}, beat ${(event.beat % beatsPerBar) + 1}`;
+    group.dataset.index = String(index);
+    for (const note of event.notes) {
+      const chip = el("span", "riff-fret", String(note.fret));
+      chip.style.background = colorFor((tuning[note.stringIndex] + note.fret) % 12);
+      group.appendChild(chip);
+    }
+    if (options.onPlayEvent) {
+      group.classList.add("riff-clickable");
+      group.addEventListener("click", (e) => {
+        e.stopPropagation();
+        options.onPlayEvent!(index);
+      });
+    }
+    // A multi-string event is one group; anchor it to its topmost (highest
+    // sounding) string so a strummed chord hangs together.
+    const anchorRow = tracks.length - 1 - Math.max(...event.notes.map((n) => n.stringIndex));
+    tracks[anchorRow]?.appendChild(group);
+  });
+
+  const head = el("div", "riff-playhead");
+  box.appendChild(head);
+  return box;
+}
+
+/** Move the playhead to a beat (fractional beats allowed). */
+export function setRiffPlayhead(box: HTMLElement, beat: number, totalBeats: number): void {
+  const fraction = totalBeats > 0 ? Math.max(0, Math.min(1, beat / totalBeats)) : 0;
+  box.style.setProperty("--riff-head-frac", String(fraction));
 }

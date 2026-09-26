@@ -8,3 +8,5 @@ Thumbs.db
 debug/comparisons.json
 # Session transcripts exported by the assistant
 session-*.md
+# Scratch space for offline sample-kit work (Phase A: sf2 extraction slices)
+scratch/

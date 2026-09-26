@@ -444,6 +444,73 @@ await new Promise((r) => setTimeout(r, 20));
 // cache and must NOT decode the file again.
 check(kitDecodes.length === decodesBefore, `switching back reuses the cached decode (${decodesBefore})`);
 
+// ---- riff play options: `when` (future placement), `strumMs` (per-event
+// width) and `releaseMs` (the note-off a riff needs) ----
+{
+  // The kit's six gates are built once per engine and reused by every play, so
+  // a release shows up as NEW events on an existing gate, not a new gate.
+  const before = gains.map((g) => g.gain.events.length);
+  kitStarts.length = 0;
+  // Two muted strings + an open G-B-e stack: four notes, one instant.
+  playVoicing([null, null, 0, 0, 0, 0], TUNING, { when: 5, strumMs: 0, releaseMs: 300 });
+  await new Promise((r) => setTimeout(r, 40));
+  check(kitStarts.length === 4, `riff play places 4 notes (got ${kitStarts.length})`);
+  check(
+    kitStarts.every((n) => n.time >= 5 && n.time < 5.0001),
+    `every note is placed at the requested future time (${kitStarts.map((n) => n.time.toFixed(4)).join(", ")})`,
+  );
+  const times = new Set(kitStarts.map((n) => n.time.toFixed(6)));
+  check(times.size === 1, `strumMs 0 blocks the chord into one exact instant (${times.size} distinct times)`);
+
+  const grew = gains.filter((g, i) => g.gain.events.length > before[i]);
+  const released = grew.filter((g) =>
+    g.gain.events.some((e) => e.type === "ramp" && e.value <= 0.001 && e.time > 5),
+  );
+  check(released.length === 4, `releaseMs damps every struck string's gate (${released.length}/4)`);
+  check(
+    released.every((g) => {
+      const attack = g.gain.events.find((e) => e.type === "ramp" && e.value > 0.001);
+      const release = g.gain.events.find((e) => e.type === "ramp" && e.value <= 0.001);
+      return attack && release && release.time > attack.time;
+    }),
+    "the release ramp comes after the attack ramp (no click, no early cut)",
+  );
+  check(
+    released.every((g) => {
+      const release = g.gain.events.find((e) => e.type === "ramp" && e.value <= 0.001);
+      return Math.abs(release.time - 5 - 0.3) < 0.02;
+    }),
+    "the release lands releaseMs after the note, not before it",
+  );
+
+  // Without releaseMs a kit note must keep ringing (the approved chord sound).
+  const before2 = gains.map((g) => g.gain.events.length);
+  playVoicing([0, 0, 0, 0, 0, 0], TUNING, { when: 8, strumMs: 0 });
+  await new Promise((r) => setTimeout(r, 40));
+  check(
+    gains.every((g, i) => !g.gain.events.slice(before2[i]).some((e) => e.type === "ramp" && e.value <= 0.001)),
+    "no release is scheduled when releaseMs is 0 (notes still ring)",
+  );
+
+  // A `when` already in the past is clamped forward, never scheduled negative.
+  kitStarts.length = 0;
+  playVoicing([0, 0, 0, 0, 0, 0], TUNING, { when: -3 });
+  await new Promise((r) => setTimeout(r, 40));
+  check(
+    kitStarts.length > 0 && kitStarts.every((n) => n.time >= 0),
+    "a past `when` is clamped to now instead of firing in the past",
+  );
+
+  // A per-event strum width must actually widen the spread past the default.
+  kitStarts.length = 0;
+  playVoicing([0, 0, 0, 3, 3, 3], TUNING, { when: 10, strumMs: 250 });
+  await new Promise((r) => setTimeout(r, 40));
+  const wide = kitStarts.map((n) => n.time).sort((a, b) => a - b);
+  const wideSpan = wide[wide.length - 1] - wide[0];
+  check(wideSpan > 0.9, `strumMs 250 spreads a full voicing over ~1.2s (got ${(wideSpan * 1000).toFixed(0)}ms)`);
+  check(wide.every((t) => t >= 10), "the widened strum still starts at the requested time");
+}
+
 if (failures.length) {
   console.error(`\nAUDIO FAILURES (${failures.length})`);
   process.exit(1);
