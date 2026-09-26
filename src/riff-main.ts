@@ -462,18 +462,23 @@ text.addEventListener("input", () => {
   editTimer = window.setTimeout(() => refresh(), RIFF_EDIT_MS);
 });
 
-for (const input of [tuningSelect, fretsInput, spanInput, capInput, strumInput, ...customStrings]) {
+// These re-plan: they change what the chord stream is voiced into.
+for (const input of [tuningSelect, fretsInput, spanInput, capInput, ...customStrings]) {
   input.addEventListener("input", () => {
-    strumInput.value = String(DEFAULT_CONFIG.strum.guitarMs);
     stop();
     refresh();
   });
 }
-strumInput.addEventListener("input", () => {
-  DEFAULT_CONFIG.strum.guitarMs = Math.max(0, readInt(strumInput, 140));
-  stop();
-  refresh();
-});
+
+// Strum speed is NOT in that list and does not re-plan. It writes the shared
+// audio config so `playVoicing` picks it up on the next click, and re-planning
+// here would rewrite the field from the config on every keystroke — which
+// silently undid the edit (typed 40, field snapped back to 140).
+const applyStrum = () => {
+  DEFAULT_CONFIG.strum.guitarMs = Math.min(400, Math.max(0, readInt(strumInput, 140)));
+};
+strumInput.addEventListener("input", applyStrum);
+strumInput.addEventListener("change", applyStrum);
 
 for (const input of [scaleInput, loopStartInput, loopEndInput]) {
   input.addEventListener("input", () => {

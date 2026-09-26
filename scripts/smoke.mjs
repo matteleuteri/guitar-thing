@@ -827,6 +827,27 @@ throws(() => parseRiff("# only a comment", riffOpts), "empty riff throws");
     /stop\(\)/.test(entry.slice(entry.indexOf('text.addEventListener("input"'))),
     "editing the notation stops playback (a redrawn timeline must not argue with a ringing loop)",
   );
+
+  // The strum box writes the shared audio config and must NOT re-plan: a
+  // re-plan rewrites the field from that config on every keystroke, which
+  // silently undoes the edit (type 40, field snaps back to 140). A pure
+  // re-planning page cannot catch this — it is only visible as a value that
+  // refuses to change — so assert the wiring shape: strum has its own handler
+  // and is absent from the re-plan list.
+  check(
+    /strumInput\.addEventListener\("input", applyStrum\)/.test(entry),
+    "the strum box has its own handler",
+  );
+  check(
+    /const rePlan = \[[^\]]*\]/.test(entry) || /for \(const input of \[tuningSelect[^\]]*\]/.test(entry),
+    "the re-plan input list exists to assert strum is not in it",
+  );
+  const rePlanList = (entry.match(/for \(const input of \[([^\]]*)\]/) || [, ""])[1];
+  check(
+    !/strumInput/.test(rePlanList),
+    `strum is not in the re-plan list (that is what made the field un-editable): ${rePlanList.trim()}`,
+  );
+
 }
 
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURES`);
