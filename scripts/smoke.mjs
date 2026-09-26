@@ -695,6 +695,7 @@ throws(() => parseRiff("# only a comment", riffOpts), "empty riff throws");
   //     beat 10 in a 760px box. Hence `.riff-canvas`.
   const css = await readFile(new URL("../style.css", import.meta.url), "utf8");
   const renderSrc = await readFile(new URL("../dist/render.js", import.meta.url), "utf8");
+  const timelineSrc = await readFile(new URL("../dist/timeline.js", import.meta.url), "utf8");
   // These are checks on CODE SHAPE, so run them on code with comments stripped:
   // each of these fixes quotes the line it replaced (to say why it changed), and
   // prose that mentions `tracks[anchorRow]?.` is not that call still existing.
@@ -704,18 +705,18 @@ throws(() => parseRiff("# only a comment", riffOpts), "empty riff throws");
   // beat IS a column so it is always on-grid, but a chord lands on a bar line,
   // and a bar line is only on-grid when beatsPerBar / step is a whole number
   // (`bar 5` with `step 0.75` put a chord 15px from the playhead's position).
-  check(
-    /group\.style\.left = `\$\{\(event\.beat \/ totalBeats\) \* 100\}%`/.test(code),
-    "a note is placed at its exact beat as a fraction of the loop",
-  );
+  // The geometry moved into src/timeline.ts so it can be unit-tested without a
+  // browser (tests/timeline.test.mjs); these assert the renderer still ROUTES
+  // through it rather than recomputing a position inline, which is how the px
+  // scale crept back in the first time.
+  check(/group\.style\.left = `\$\{noteLeftPercent\(/.test(code),
+    "a note is placed at its exact beat, via the shared timeline geometry");
   check(
     !/Math\.round\(event\.beat \/ stepBeats\)/.test(code),
     "a note is not snapped to a whole column (that moved chords off their beat)",
   );
-  check(
-    /--riff-bar-start", String\(\(bar \* beatsPerBar\) \/ totalBeats\)/.test(code),
-    "a bar mark is a fraction of the loop, not a step count",
-  );
+  check(/--riff-bar-start", String\(barMarkFraction\(/.test(code),
+    "a bar mark is a fraction of the loop, not a step count");
 
   // The positioned overlay hangs off a canvas whose width IS gutter + track,
   // so `100%` means the track in both the filling and the scrolling case.

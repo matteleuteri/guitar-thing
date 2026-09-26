@@ -45,6 +45,19 @@ export class RiffTransport {
   /** Piece beat that `anchorTime` corresponds to. */
   private anchorBeat = 0;
   private anchorTime = 0;
+  /**
+   * The playhead's own anchor: what is SOUNDING right now.
+   *
+   * It is deliberately NOT the scheduling anchor. Scheduling runs a full
+   * LOOKAHEAD_S ahead of the clock, so its anchor is pre-rolled into the next
+   * pass before a note has finished ringing — which is right for placing notes
+   * on the audio clock, and wrong for anything a person looks at. Sharing one
+   * anchor meant the playhead jumped to the next pass while the last chord was
+   * still ringing: it ran off the left edge, clamped there for over a second,
+   * and the loop looked like it stopped early. Two anchors, one formula.
+   */
+  private playBeat = 0;
+  private playTime = 0;
   /** Next event to place; events are pre-filtered to the loop window. */
   private queue: RiffEvent[] = [];
   private queueIndex = 0;
@@ -89,11 +102,7 @@ export class RiffTransport {
   /** Current playhead position in beats, or `null` when stopped. */
   getBeat(): number | null {
     if (!this.playing) return null;
-    return this.beatAt(this.callbacks.now());
-  }
-
-  private beatAt(time: number): number {
-    return this.anchorBeat + (time - this.anchorTime) / this.spb;
+    return this.playBeat + (this.callbacks.now() - this.playTime) / this.spb;
   }
 
   private timeAt(beat: number): number {
@@ -112,6 +121,8 @@ export class RiffTransport {
     this.queueIndex = 0;
     this.anchorBeat = this.loopStart;
     this.anchorTime = this.callbacks.now() + leadIn;
+    this.playBeat = this.loopStart;
+    this.playTime = this.anchorTime;
     this.timer = this.ticker.every(TICK_MS, () => this.advance());
     this.advance();
   }
@@ -132,36 +143,56 @@ export class RiffTransport {
   advance(time: number = this.callbacks.now()): void {
     if (this.timer === null) return;
     const horizon = time + LOOKAHEAD_S;
-    // Place every event due before the horizon. Guard the loop count: a window
-    // with no events still has to advance the anchor past its end, or this
-    // would spin forever.
+    // The playhead wraps at the AUDIBLE end of the pass. This is a pure
+    // function of the clock, so it is independent of the queue and of the
+    // lookahead below.
+    this.wrapPlayhead(time);
+    // At most one pre-roll per pass: a loop shorter than the lookahead would
+    // otherwise satisfy the pre-roll condition forever and spin.
+    let preRolled = false;
     for (let guard = 0; guard < 512; guard++) {
-      if (time >= this.timeAt(this.loopEnd)) {
+      if (!preRolled && time >= this.timeAt(this.loopEnd) - LOOKAHEAD_S) {
         this.advancePass(time);
+        preRolled = true;
         continue;
       }
       const event = this.queue[this.queueIndex];
-      if (!event) {
-        // Nothing left in this pass: jump the anchor to the loop end and wrap.
-        this.anchorTime = Math.max(this.timeAt(this.loopEnd), time + 0.01);
-        this.anchorBeat = this.loopEnd;
-        this.advancePass(time);
-        continue;
-      }
+      if (!event) return;
       const when = this.timeAt(event.beat);
       if (when > horizon) return;
+      // An event whose time has already gone by is one we are late placing
+      // (only reachable after a stall — see advancePass). Skip it: scheduling
+      // it in the past would fire a whole catch-up burst at once.
+      if (when < time - 1e-9) {
+        this.queueIndex++;
+        continue;
+      }
       this.callbacks.onEvent(event, when);
       this.queueIndex++;
     }
   }
 
+  /** Move the playhead to the top of the loop, exactly, once the pass has sounded. */
+  private wrapPlayhead(time: number): void {
+    const playEnd = this.playTime + (this.loopEnd - this.playBeat) * this.spb;
+    if (time < playEnd) return;
+    this.playTime = playEnd;
+    this.playBeat = this.loopStart;
+  }
+
   /**
-   * Wrap to the top of the loop window. The new anchor is derived from the
-   * SCHEDULED end time, not `now()`, so the loop length never drifts with timer
-   * jitter or a late tick.
+   * Pre-roll the next pass. The new anchor is derived from the SCHEDULED end
+   * time, not `now()`, so the loop length never drifts with timer jitter or a
+   * late tick — anchoring on `now()` instead loses up to one tick (25ms) per
+   * wrap, which is 10% of a 250ms note after ten passes.
    */
   private advancePass(time: number): void {
-    this.anchorTime = Math.max(this.timeAt(this.loopEnd), time + 0.01);
+    const scheduledEnd = this.timeAt(this.loopEnd);
+    // Normally the pre-roll above fires a lookahead early, so the scheduled end
+    // is still in the future and is used as-is. If we are more than a lookahead
+    // BEHIND — the tab was suspended, the machine slept — re-anchor on `now()`,
+    // or every event of the pass would be scheduled in the past.
+    this.anchorTime = scheduledEnd > time - LOOKAHEAD_S ? scheduledEnd : time;
     this.anchorBeat = this.loopStart;
     this.queue = this.eventsInWindow(this.loopStart, this.loopEnd);
     this.queueIndex = 0;

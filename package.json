@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc && node scripts/build-info.mjs",
     "start": "npm run build && node server.mjs",
-    "test": "npm run build && node scripts/smoke.mjs && node scripts/audio-sched.mjs",
+    "test": "npm run build && node scripts/smoke.mjs && node scripts/audio-sched.mjs && node --test",
     "debug": "npm run build && node server.mjs",
     "here": "node scripts/here.mjs"
   },

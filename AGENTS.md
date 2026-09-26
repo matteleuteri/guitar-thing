@@ -41,7 +41,14 @@ blocking). Everything on `main` stays as-is.
 the full design. A first slice is landed: `src/riff.ts` (model + parser),
 `src/transport.ts` (lookahead scheduler), `when`/`strumMs`/`releaseMs` options
 on `playVoicing`, kit note release in `src/synth/smplr.ts`, a timeline in
-`src/render.ts`, and the Riff mode UI. **Not yet done:** any real-browser
+`src/render.ts`, and the Riff mode UI. Two hardening passes followed: the
+playhead got its own anchor, separate from the scheduling anchor (`dacd3ed` —
+sharing one dragged the playhead a lookahead early, so it clamped at the left
+edge while the last chord still rang), and the timeline's geometry moved into
+`src/timeline.ts` as pure functions of beats. The parser, transport and geometry
+now have Node unit tests in `tests/`, wired into `npm test`: every bug in this
+list broke silently in a browser, so the properties they violated are asserted
+in Node. **Not yet done:** any real-browser
 listen-through, notation for rhythm/duration, raw Hz/MIDI input, per-event
 strum overrides, a metronome/count-in, or finger-number/learning aids.
 
@@ -133,8 +140,10 @@ numbers are superseded in priority by the kit.
 - `npm start` — build, then run `node server.mjs` (zero-dep static server, port 5173).
 - `npm test` — build + `node scripts/smoke.mjs` (imports compiled `dist/`, asserts
   theory/fingering invariants + perf) + `node scripts/audio-sched.mjs` (stubs Web
-  Audio to assert the voice-graph strum/gating invariants). Always run before
-  declaring a change done.
+  Audio to assert the voice-graph strum/gating invariants) + `node --test` (unit
+  tests in `tests/`: the riff parser as a user-facing surface, the transport's
+  playhead/scheduler split, and the timeline geometry that keeps notes and
+  playhead on one scale). Always run before declaring a change done.
 - `node server.mjs` directly to serve without rebuilding.
 - `npm run here` — print the current branch/commit, whether `dist/` was built
   from it, and whether anything is unpushed. Run this first when picking up

@@ -3,6 +3,7 @@ import { findPositions, type Fingering } from "./fretboard.js";
 import { chordShape } from "./fretboard.js";
 import type { RiffEvent } from "./riff.js";
 import { midiName, SEMITONES } from "./theory.js";
+import { barMarkFraction, noteLeftPercent, stepColumns, trackFraction } from "./timeline.js";
 
 /** Create an element with an optional class and text content. */
 export function el(tag: string, cls?: string, text?: string | number): HTMLElement {
@@ -351,7 +352,7 @@ export function renderRiffTimeline(
   const stringCount = tuning.length;
   // One column per step; the final column carries the bar that starts there so
   // a long riff still gets a sensible width.
-  const stepCount = Math.max(1, Math.ceil(totalBeats / stepBeats));
+  const stepCount = stepColumns(totalBeats, stepBeats);
   box.style.setProperty("--riff-cols", String(stepCount));
 
   // Bar ruler.
@@ -363,7 +364,7 @@ export function renderRiffTimeline(
     const cell = el("div", "riff-bar", String(bar + 1));
     // A fraction of the loop, the same unit a note's `left: %` uses -- not a
     // step count, which would have to be multiplied by a px step size to match.
-    cell.style.setProperty("--riff-bar-start", String((bar * beatsPerBar) / totalBeats));
+    cell.style.setProperty("--riff-bar-start", String(barMarkFraction(bar, beatsPerBar, totalBeats)));
     barTrack.appendChild(cell);
   }
   ruler.appendChild(barTrack);
@@ -374,8 +375,8 @@ export function renderRiffTimeline(
   // percentage would measure from the container, not from the track).
   if (options.loop) {
     const region = el("div", "riff-loop");
-    region.style.setProperty("--riff-loop-a", String(options.loop.start / totalBeats));
-    region.style.setProperty("--riff-loop-b", String(options.loop.end / totalBeats));
+    region.style.setProperty("--riff-loop-a", String(trackFraction(options.loop.start, totalBeats)));
+    region.style.setProperty("--riff-loop-b", String(trackFraction(options.loop.end, totalBeats)));
     canvas.appendChild(region);
   }
 
@@ -401,7 +402,7 @@ export function renderRiffTimeline(
     // own bar mark sit. A tab event is always on-grid (its beat IS a column),
     // but a chord lands on a bar line, and a bar line is only on-grid when
     // beatsPerBar / step is a whole number -- e.g. `bar 5` with `step 0.75`.
-    group.style.left = `${(event.beat / totalBeats) * 100}%`;
+    group.style.left = `${noteLeftPercent(event.beat, totalBeats)}%`;
     group.title = `${event.label} — bar ${Math.floor(event.beat / beatsPerBar) + 1}, beat ${(event.beat % beatsPerBar) + 1}`;
     group.dataset.index = String(index);
     for (const note of event.notes) {
@@ -578,6 +579,5 @@ export function renderRiffGrid(beatsPerBar: number, stepBeats: number, totalBeat
 
 /** Move the playhead to a beat (fractional beats allowed). */
 export function setRiffPlayhead(box: HTMLElement, beat: number, totalBeats: number): void {
-  const fraction = totalBeats > 0 ? Math.max(0, Math.min(1, beat / totalBeats)) : 0;
-  box.style.setProperty("--riff-head-frac", String(fraction));
+  box.style.setProperty("--riff-head-frac", String(trackFraction(beat, totalBeats)));
 }
