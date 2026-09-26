@@ -1,4 +1,4 @@
-import { playVoicing, preloadGuitarEngine, primeAudio, getGuitarKit, setGuitarKit, stopAudio, audioNow, type GuitarKitName } from "./audio.js";
+import { playVoicing, preloadGuitarEngine, primeAudio, getGuitarKit, setGuitarKit, stopAudio, audioNow, playClick, type GuitarKitName } from "./audio.js";
 import { chordShape } from "./fretboard.js";
 import {
   chordName,
@@ -63,6 +63,8 @@ const customStrings = Array.from(customTuning.querySelectorAll("input")) as HTML
 const scaleInput = document.getElementById("riff-scale") as HTMLInputElement;
 const loopStartInput = document.getElementById("riff-loop-start") as HTMLInputElement;
 const loopEndInput = document.getElementById("riff-loop-end") as HTMLInputElement;
+const metronomeInput = document.getElementById("riff-metronome") as HTMLInputElement;
+const countInInput = document.getElementById("riff-countin") as HTMLInputElement;
 const playButton = document.getElementById("riff-play") as HTMLButtonElement;
 const stopButton = document.getElementById("riff-stop") as HTMLButtonElement;
 
@@ -164,7 +166,11 @@ function start() {
   loopEndInput.max = loopStartInput.max;
   const next = new RiffTransport(riff, secondsPerBeat(riff, speed()), {
     onEvent: (event, when) => playEvent(event, when),
+    onClick: (_beat, when, isDownbeat) => playClick(when, isDownbeat),
     now: audioNow,
+  }, undefined, {
+    metronome: metronomeInput.checked,
+    countInBars: Math.min(8, Math.max(0, readInt(countInInput, 0))),
   });
   next.setLoop(loopWindow(riff).start, loopWindow(riff).end);
   next.play();

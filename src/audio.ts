@@ -1179,6 +1179,27 @@ export async function renderOfflineVoicing(
   }
 }
 
+/**
+ * A metronome click at an absolute context time. Downbeats are higher-pitched.
+ * The click is a short square-wave blip with a fast attack and exponential
+ * decay — 50 ms total, loud enough to hear over the guitar but not harsh.
+ */
+export function playClick(when: number, isDownbeat: boolean): void {
+  if (!context) return;
+  const t = Math.max(when, context.currentTime);
+  const osc = context.createOscillator();
+  const gain = context.createGain();
+  osc.connect(gain);
+  gain.connect(context.destination);
+  osc.type = "square";
+  osc.frequency.value = isDownbeat ? 1600 : 1100;
+  gain.gain.setValueAtTime(0.0001, t);
+  gain.gain.exponentialRampToValueAtTime(0.08, t + 0.002);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+  osc.start(t);
+  osc.stop(t + 0.06);
+}
+
 /** Silences anything still ringing. */
 export function stopAudio(): void {
   for (const voice of [...live]) {

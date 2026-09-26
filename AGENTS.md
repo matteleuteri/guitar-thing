@@ -36,19 +36,20 @@ for the uncommitted SF2 work to be re-evaluated rather than built on; verdict:
 it is parked (it fixes sample *source*, not the thing that was actually
 blocking). Everything on `main` stays as-is.
 
-**In flight: the riff trainer (uncommitted, `npm test` green).** A
-"Chord stream + tab lane" notation the user chose; see "Riff trainer" below for
-the full design. A first slice is landed: `src/riff.ts` (model + parser),
-`src/transport.ts` (lookahead scheduler), `when`/`strumMs`/`releaseMs` options
-on `playVoicing`, kit note release in `src/synth/smplr.ts`, a timeline in
-`src/render.ts`, and the Riff mode UI. Two hardening passes followed: the
-playhead got its own anchor, separate from the scheduling anchor (`dacd3ed` —
-sharing one dragged the playhead a lookahead early, so it clamped at the left
-edge while the last chord still rang), and the timeline's geometry moved into
-`src/timeline.ts` as pure functions of beats. The parser, transport and geometry
-now have Node unit tests in `tests/`, wired into `npm test`: every bug in this
-list broke silently in a browser, so the properties they violated are asserted
-in Node. **Not yet done:** any real-browser
+**The riff trainer is landed on `main` and deployed** (commits `57a9b28` +
+`28cdfcf`, pushed to `origin/main`). A "Chord stream + tab lane" notation the
+user chose; see "Riff trainer" below for the full design. The full slice:
+`src/riff.ts` (model + parser), `src/transport.ts` (lookahead scheduler),
+`when`/`strumMs`/`releaseMs` options on `playVoicing`, kit note release in
+`src/synth/smplr.ts`, a timeline in `src/render.ts`, and the Riff mode UI. Two
+hardening passes followed: the playhead got its own anchor, separate from the
+scheduling anchor (sharing one dragged the playhead a lookahead early, so it
+clamped at the left edge while the last chord still rang), and the timeline's
+geometry moved into `src/timeline.ts` as pure functions of beats. The parser,
+transport and geometry have Node unit tests in `tests/`, wired into `npm test`.
+The loop-to-bar input defaults to 4 so the shipped 4-bar example loops in full.
+The user verified the live page looks right (it was a browser cache issue).
+**Not yet done:** any real-browser
 listen-through, notation for rhythm/duration, raw Hz/MIDI input, per-event
 strum overrides, a metronome/count-in, or finger-number/learning aids.
 

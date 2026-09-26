@@ -155,6 +155,14 @@ G|--------------------------------|</textarea
             <input id="riff-loop-end" type="number" min="1" max="64" step="1" value="4" />
           </div>
           <div class="field">
+            <label for="riff-metronome">Metronome</label>
+            <input id="riff-metronome" type="checkbox" title="Play a click track on every beat" />
+          </div>
+          <div class="field">
+            <label for="riff-countin">Count-in (bars)</label>
+            <input id="riff-countin" type="number" min="0" max="8" step="1" value="0" title="Bars of metronome click before the riff starts" />
+          </div>
+          <div class="field">
             <label>&nbsp;</label>
             <span class="riff-transport">
               <button id="riff-play" type="button">Play ▶</button>

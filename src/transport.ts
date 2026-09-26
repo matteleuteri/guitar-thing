@@ -20,8 +20,18 @@ const LOOKAHEAD_S = 0.3;
 export interface TransportCallbacks {
   /** Place one event at an absolute AudioContext time. */
   onEvent: (event: RiffEvent, when: number) => void;
+  /** A metronome click on `beat` at `when`. `isDownbeat` = first beat of a bar. */
+  onClick: (beat: number, when: number, isDownbeat: boolean) => void;
   /** The context's current time — injected so the transport is testable. */
   now: () => number;
+}
+
+/** Options for the transport's metronome + count-in. */
+export interface TransportOptions {
+  /** Click on every beat (downbeat higher-pitched). */
+  metronome: boolean;
+  /** Bars of metronome-only count-in before the riff starts (0 = none). */
+  countInBars: number;
 }
 
 /** Timer seam, so a test can drive `advance()` instead of real time. */
@@ -63,17 +73,24 @@ export class RiffTransport {
   private queueIndex = 0;
   private loopStart: number;
   private loopEnd: number;
+  /** Next metronome click beat to schedule. */
+  private nextClickBeat = 0;
+  private readonly metronome: boolean;
+  private readonly countInBars: number;
 
   constructor(
     riff: Riff,
     secondsPerBeat: number,
     callbacks: TransportCallbacks,
     ticker: TransportTicker = realTicker,
+    options: TransportOptions = { metronome: false, countInBars: 0 },
   ) {
     this.riff = riff;
     this.spb = secondsPerBeat;
     this.callbacks = callbacks;
     this.ticker = ticker;
+    this.metronome = options.metronome;
+    this.countInBars = options.countInBars;
     this.loopStart = riff.loop.start;
     this.loopEnd = riff.loop.end;
     this.queue = this.eventsInWindow(this.loopStart, this.loopEnd);
@@ -119,10 +136,13 @@ export class RiffTransport {
     this.stop();
     this.queue = this.eventsInWindow(this.loopStart, this.loopEnd);
     this.queueIndex = 0;
-    this.anchorBeat = this.loopStart;
+    // A count-in shifts the anchor beat back so the riff starts N bars later.
+    // The metronome clicks through the count-in, then the riff begins.
+    this.anchorBeat = this.loopStart - this.countInBars * this.riff.beatsPerBar;
     this.anchorTime = this.callbacks.now() + leadIn;
-    this.playBeat = this.loopStart;
+    this.playBeat = this.anchorBeat;
     this.playTime = this.anchorTime;
+    this.nextClickBeat = this.anchorBeat;
     this.timer = this.ticker.every(TICK_MS, () => this.advance());
     this.advance();
   }
@@ -133,6 +153,7 @@ export class RiffTransport {
       this.timer = null;
     }
     this.queueIndex = 0;
+    this.nextClickBeat = 0;
   }
 
   /**
@@ -147,6 +168,14 @@ export class RiffTransport {
     // function of the clock, so it is independent of the queue and of the
     // lookahead below.
     this.wrapPlayhead(time);
+    // Schedule metronome clicks BEFORE the riff-event loop. That loop has
+    // early returns (empty queue, event beyond horizon) that would skip the
+    // clicks entirely — the metronome must tick regardless of event density.
+    // If advancePass fires below, nextClickBeat was already reset and clicks
+    // for the next pass will be placed on the next advance() call.
+    if (this.metronome) {
+      this.scheduleClicks(time, horizon);
+    }
     // At most one pre-roll per pass: a loop shorter than the lookahead would
     // otherwise satisfy the pre-roll condition forever and spin.
     let preRolled = false;
@@ -196,5 +225,24 @@ export class RiffTransport {
     this.anchorBeat = this.loopStart;
     this.queue = this.eventsInWindow(this.loopStart, this.loopEnd);
     this.queueIndex = 0;
+    // Reset the click cursor so the next pass clicks from its first beat.
+    this.nextClickBeat = this.loopStart;
+  }
+
+  /**
+   * Schedule metronome clicks for every beat in [nextClickBeat, loopEnd) that
+   * falls within the lookahead horizon. Clicks before `loopStart` are the
+   * count-in; clicks at/after it are the riff's own beats.
+   */
+  private scheduleClicks(time: number, horizon: number): void {
+    while (this.nextClickBeat < this.loopEnd) {
+      const when = this.timeAt(this.nextClickBeat);
+      if (when > horizon) break;
+      if (when >= time - 1e-9) {
+        const beatInBar = ((this.nextClickBeat % this.riff.beatsPerBar) + this.riff.beatsPerBar) % this.riff.beatsPerBar;
+        this.callbacks.onClick(this.nextClickBeat, when, beatInBar === 0);
+      }
+      this.nextClickBeat++;
+    }
   }
 }

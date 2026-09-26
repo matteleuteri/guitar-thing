@@ -22,10 +22,11 @@ const riffOpts = {
 };
 
 /** A transport on a hand-driven clock; no timers, no audio. */
-function harness(text, { loop } = {}) {
+function harness(text, { loop, metronome = false, countInBars = 0 } = {}) {
   const riff = parseRiff(text, riffOpts);
   let clock = 0;
   const fired = [];
+  const clicks = [];
   const transport = new RiffTransport(
     riff,
     secondsPerBeat(riff),
@@ -34,12 +35,14 @@ function harness(text, { loop } = {}) {
       // Record the clock each note was placed at, so a test can ask "was this
       // note ever scheduled behind the clock?" without rewinding time.
       onEvent: (event, when) => fired.push({ beat: event.beat, when, placedAt: clock }),
+      onClick: (beat, when, isDownbeat) => clicks.push({ beat, when, isDownbeat }),
     },
     { every: () => 1, clear: () => undefined },
+    { metronome, countInBars },
   );
   if (loop) transport.setLoop(loop[0], loop[1]);
   return {
-    riff, transport, fired,
+    riff, transport, fired, clicks,
     /** Run `seconds` of context time in `stepMs` ticks, as the real ticker would. */
     run(seconds, stepMs = 20) {
       for (let t = 0; t <= seconds * 1000; t += stepMs) {
@@ -191,5 +194,74 @@ test("scheduled times never go backwards", () => {
       h.fired[i].when >= h.fired[i - 1].when - 1e-9,
       `note ${i} at ${h.fired[i].when} is before note ${i - 1} at ${h.fired[i - 1].when}`,
     );
+  }
+});
+
+// --- metronome + count-in ---
+
+test("metronome clicks on every beat of the loop", () => {
+  const h = harness(EIGHTHS, { loop: [0, 4], metronome: true });
+  h.transport.play(0);
+  h.run(4, 20);
+  // 4 beats at 120bpm = 2s. Clicks should fire on beats 0, 1, 2, 3.
+  const clickBeats = h.clicks.map((c) => c.beat);
+  for (const beat of [0, 1, 2, 3]) {
+    assert.ok(clickBeats.includes(beat), `no click on beat ${beat}`);
+  }
+});
+
+test("metronome downbeats are flagged", () => {
+  const h = harness(EIGHTHS, { loop: [0, 4], metronome: true });
+  h.transport.play(0);
+  h.run(4, 20);
+  const downbeats = h.clicks.filter((c) => c.isDownbeat).map((c) => c.beat);
+  assert.ok(downbeats.includes(0), "beat 0 is a downbeat");
+  assert.ok(!downbeats.includes(1), "beat 1 is not a downbeat");
+  assert.ok(!downbeats.includes(2), "beat 2 is not a downbeat");
+  assert.ok(!downbeats.includes(3), "beat 3 is not a downbeat");
+});
+
+test("metronome off means no clicks", () => {
+  const h = harness(EIGHTHS, { loop: [0, 4], metronome: false });
+  h.transport.play(0);
+  h.run(4, 20);
+  assert.equal(h.clicks.length, 0, "clicks fired with metronome off");
+});
+
+test("count-in shifts the riff start but clicks through", () => {
+  // 1 bar count-in at 120bpm = 2s. No riff events should fire before 2s.
+  const h = harness(EIGHTHS, { loop: [0, 4], metronome: true, countInBars: 1 });
+  h.transport.play(0);
+  h.run(0.1);
+  assert.equal(h.fired.length, 0, "riff events fired during count-in");
+  // But clicks should be firing (count-in beats -4..-1, then 0..3).
+  assert.ok(h.clicks.length > 0, "no clicks during count-in");
+  // After the count-in, riff events should fire.
+  h.run(2.5);
+  assert.ok(h.fired.length > 0, "riff events did not fire after count-in");
+});
+
+test("count-in clicks include the count-in beats", () => {
+  const h = harness(EIGHTHS, { loop: [0, 4], metronome: true, countInBars: 1 });
+  h.transport.play(0);
+  // Run 2.0s: the count-in is 1 bar = 4 beats = 2s at 120bpm, so all four
+  // count-in clicks (beats -4..-1) have fired by 1.56s, and the riff's first
+  // event (beat 0) is at 2.06s — still in the future.
+  h.run(2.0);
+  const clickBeats = h.clicks.map((c) => c.beat);
+  for (const beat of [-4, -3, -2, -1]) {
+    assert.ok(clickBeats.includes(beat), `no count-in click on beat ${beat}`);
+  }
+});
+
+test("metronome keeps clicking across loop wraps", () => {
+  const h = harness(EIGHTHS, { loop: [0, 2], metronome: true });
+  h.transport.play(0);
+  h.run(6, 20);
+  // Loop is 2 beats = 1s at 120bpm. In 6s, ~6 passes = 12 clicks.
+  assert.ok(h.clicks.length >= 10, `only ${h.clicks.length} clicks over 6 passes`);
+  // Every click should be on beat 0 or 1 (the loop window).
+  for (const c of h.clicks) {
+    assert.ok(c.beat === 0 || c.beat === 1, `click on unexpected beat ${c.beat}`);
   }
 });
