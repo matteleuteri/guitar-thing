@@ -73,6 +73,18 @@ const UNCLOSED_LANE = /^\s*[eBGDAE]\s*\|/;
 const MUTE_CHARS = new Set(["x", "X"]);
 
 /**
+ * A fingering as printed chord-shape text, low string first: `xx201x`. This is
+ * the tab for an auto-voiced chord, and it is the thing the notation box cannot
+ * show — the box says `C`, one character, and the shape was chosen by the
+ * voicing DP. It was computed all along (a chord cannot sound without it) and
+ * drawn in the timeline, but neither is where you look when you are reading a
+ * progression, and a voicing you cannot see is a voicing you cannot check.
+ */
+export function chordShape(frets: (number | null)[]): string {
+  return frets.map((fret) => (fret === null ? "x" : String(fret))).join("");
+}
+
+/**
  * How long one tab column lasts, in beats. `step 0.5` is a number of BEATS,
  * which is not how anyone says rhythm out loud — a guitarist thinks "8ths",
  * "16ths", "triplets". So `step`/`grid` also take note-value names, and the

@@ -1,6 +1,6 @@
 import { playFrettedNote, playNotes, playVoicing } from "./audio.js";
 import { findPositions, type Fingering } from "./fretboard.js";
-import type { RiffEvent } from "./riff.js";
+import { chordShape, type RiffEvent } from "./riff.js";
 import { midiName, SEMITONES } from "./theory.js";
 
 /** Create an element with an optional class and text content. */
@@ -477,10 +477,13 @@ export function renderRiffReading(
     // What the page said (`C` + `e5`, or just `5`) — kept verbatim so a row can
     // be matched back to a column of the notation by eye.
     row.appendChild(el("span", "riff-reading-label", here.map((event) => event.label).join(" + ")));
-    const bed = chord ? sounded(chord) : "";
+    // The shape only exists for a voicing the app chose; a tab event's tab is
+    // already the label, verbatim from the lane. It gets its own column so the
+    // shapes line up when you scan a progression instead of running together.
+    row.appendChild(el("span", "riff-reading-shape", chord ? chordShape(chord.frets) : ""));
     const onTop = over.map(sounded).join(" + ");
-    const detail = chord && onTop ? `${bed} with ${onTop} on top` : chord ? bed : onTop;
-    row.appendChild(el("span", "riff-reading-notes", detail));
+    const bed = chord ? sounded(chord) : "";
+    row.appendChild(el("span", "riff-reading-notes", chord && onTop ? `${bed} with ${onTop} on top` : chord ? bed : onTop));
     // Where the shape came from, which is the only part the app invented.
     const source = chord
       ? over.length

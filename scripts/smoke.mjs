@@ -2,7 +2,7 @@ import { findFingerings, findPositions } from "../dist/fretboard.js";
 import { findPianoKeys, findPianoVoicings } from "../dist/piano.js";
 import { chordName, midiName, noteName, parseNotes, parseStringMidi, parseChord } from "../dist/theory.js";
 import { parseProgression, planGuitarSong, planPianoSong } from "../dist/song.js";
-import { parseRiff, secondsPerBeat, stepName } from "../dist/riff.js";
+import { chordShape, parseRiff, secondsPerBeat, stepName } from "../dist/riff.js";
 import { RiffTransport } from "../dist/transport.js";
 import { readFile } from "node:fs/promises";
 
@@ -338,6 +338,35 @@ const riffOpts = { tuning: STANDARD, maxFrets: 15, span: 5, cap: 200 };
   check(
     parseRiff(`tempo 96  # slow\n${lane}`, riffOpts).bpm === 96,
     "grid: a commented tempo still parses",
+  );
+}
+
+// --- an auto-voiced chord prints as a shape you can read and override ---
+// The notation box says `C`; the app picks the shape. It was always computed
+// and drawn in the timeline, but "the voicing you cannot see is the voicing you
+// cannot check" is why the readout prints it -- and once it is printed, the
+// three-string result is obvious, which is the point.
+{
+  const shape = chordShape([null, null, 2, 0, 1, null]);
+  check(shape === "xx201x", `chordShape reads low string first, x for muted (got ${shape})`);
+  check(chordShape([0, 0, 0, 0, 0, 0]) === "000000", "chordShape of an open shape is all digits");
+  check(
+    chordShape([null, 3, 2, 0, 1, 0]) === "x32010",
+    "chordShape matches the printed C shape a guitarist would use (got " + chordShape([null, 3, 2, 0, 1, 0]) + ")",
+  );
+  const r = parseRiff("C Am F G", riffOpts);
+  const shapes = r.events.filter((e) => e.kind === "chord").map((e) => chordShape(e.frets));
+  check(
+    shapes.every((s) => s.length === 6),
+    `every chord shape has one character per string (${shapes.join(" ")})`,
+  );
+  // Known and deliberately NOT fixed yet: guitarTransition in song.ts charges
+  // nothing for a string muted in BOTH voicings, so the shortest path through a
+  // progression can drop to three strings. This asserts the shape is printable
+  // so that stays visible; changing the cost is a musical decision, not a test.
+  check(
+    shapes.some((s) => (s.match(/x/g) || []).length >= 3),
+    `the current auto-voicing really does drop strings (${shapes.join(" ")}) — the cost function pays no price for a string muted in both chords`,
   );
 }
 

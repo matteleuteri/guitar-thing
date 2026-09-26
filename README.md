@@ -104,8 +104,11 @@ together**: a chord and a tab note on the same beat are one moment, the note
 sounding *on top of* the chord, exactly as you would strum it. That is what a
 chord chart printed above tab means in a songbook. So the two lines are layers,
 not two ways of writing the same music — and the readout says so per moment
-(`C + 5 → E3 G3 C4 with A4 on top`) rather than printing two rows at the same
-time, which read as a duplicate. Chord voicings are chosen automatically (the
+(`C + 5 | xx201x | E3 G3 C4 with A4 on top`) rather than printing two rows at
+the same time, which read as a duplicate. The `xx201x` is the shape the app
+chose, printed low string first with `x` for a muted string — the tab for a
+chord you only typed as a letter, so you can read it, check it, and paste it
+into a lane if you want to change it. Chord voicings are chosen automatically (the
 hand moves as little as possible), so the tab lane is the escape hatch when you
 want exact strings.
 

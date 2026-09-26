@@ -606,11 +606,14 @@ h2 .muted { font-size: .85rem; font-weight: 400; color: var(--muted); }
 .riff-reading-bar-time { color: var(--muted); letter-spacing: 0; }
 .riff-reading-row {
   display: grid;
-  grid-template-columns: 2.1rem 3.4rem minmax(5rem, 9rem) 1fr auto;
+  grid-template-columns: 2.1rem 3.4rem minmax(5rem, 8rem) 5.5rem 1fr auto;
   gap: .5rem;
   align-items: baseline;
   padding: .12rem .6rem;
 }
+/* The auto-chosen shape, printed the way a chord diagram does: x for a muted
+   string, low string first, so `xx201x` can be read straight off the row. */
+.riff-reading-shape { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); }
 /* The number columns are tabular so the times stay in column as you read down,
    which is the whole point of a list like this. */
 .riff-reading-beat, .riff-reading-time { color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -633,5 +636,6 @@ h2 .muted { font-size: .85rem; font-weight: 400; color: var(--muted); }
 @media (max-width: 700px) {
   .riff-legend-body { columns: 1; }
   .riff-reading-row { grid-template-columns: 1.8rem 3.2rem 1fr; }
+  .riff-reading-shape { display: none; }
   .riff-reading-voiced { display: none; }
 }

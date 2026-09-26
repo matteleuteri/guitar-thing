@@ -229,11 +229,25 @@ its bar's mark, and `scripts/smoke.mjs` asserts that alignment (token column ==
 `2 + bar * perBar`, lane is a whole number of bars) rather than trusting an
 eyeball: it is invisible when it drifts.
 
+**An auto-voiced chord prints its shape, and the shape is bad.** The box says
+`C`; the voicing DP picks the frets. They were always computed (a chord cannot
+sound without them) and drawn in the timeline, but neither is where you look
+when reading a progression, and a voicing you cannot see is one you cannot
+check — so the readout has a `chordShape` column (`xx201x`, low string first,
+`x` = muted, from `riff.ts` so it is testable). Printing it exposed the actual
+bug: **`guitarTransition` (`song.ts`) charges nothing for a string muted in
+BOTH voicings**, so muting is free and the shortest path through `C Am F G`
+collapses to three strings (`C = xx201x` where a guitarist plays `x32010`).
+That is a real sound problem — a thin, hollow chord — and a change to the cost
+function, so it is a musical decision and is NOT made here. `smoke.mjs`
+asserts the shapes are printable and that the string-dropping is really
+happening, so it cannot regress unnoticed.
+
 **The readout groups by MOMENT, not by event.** A chord and a tab note on the
 same beat is one thing you hear, and printing it as two rows at the same
 beat/time read as a duplicated entry — which is most of why the union felt
 arbitrary. `renderRiffReading` now collapses equal-beat events into one row
-spelled `C + 5 → E3 G3 C4 with A4 on top`, tagged `chord + tab`. Only a chord
+spelled `C + 5 | xx201x | E3 G3 C4 with A4 on top`, tagged `chord + tab`. Only a chord
 and a tab event can share a beat (chords land on `index * beatsPerBar`, tab
 events on `column * stepBeats`, one event per column), so a run of equal beats
 is always at most a chord plus a lane — but the grouping is written generally
