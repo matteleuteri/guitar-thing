@@ -370,11 +370,49 @@ on a "lanes have different lengths" error). When you touch a notation example,
 only opens a comment at the **start** of a token, so `C Am F#m7 Bb7 # cadence`
 keeps all four chords; a mid-token `#` is a sharp.
 
-`src/render.ts`'s `renderRiffTimeline` is a per-string grid whose track width is
-`--riff-cols * --riff-step`; a note's `left: %` is therefore exact, and the
-loop region + playhead add `--riff-gutter` to measure from the same origin. Keep
-those three in step — a note at `left: 0%` and a playhead at `0` must land on the
-same pixel.
+`src/render.ts`'s `renderRiffTimeline` is a per-string grid. **The invariant:
+everything horizontal is a FRACTION OF THE TRACK.** Notes (`left: %` of the
+track), bar marks (`--riff-bar-start` × 100% of the bar track), the loop region
+and the playhead all measure from the same box in the same unit, and the step
+gridline's period is `calc(100% / var(--riff-cols))` of the track. A note at
+`left: 0%`, a bar mark at `--riff-bar-start: 0` and a playhead at
+`--riff-head-frac: 0` must land on the same pixel.
+
+**Do not reintroduce a px step into any of it.** The track is `flex: 1 0 auto`,
+so it *grows* past its declared `width: calc(var(--riff-cols) * var(--riff-step))`
+to fill a wide panel, and *overflows* a narrow one (then the box scrolls).
+Multiplying a px `--riff-step` into a position therefore silently put the
+playhead, the loop region, the bar numbers and the gridlines on a different
+scale from the notes: the error starts at 0 and grows linearly, and the shipped
+4-bar riff ended **77px adrift** with nothing thrown, warned or logged. It is
+only visible as pixels.
+
+Two more traps in the same function, both silent:
+
+- **`100%` must mean the track.** The positioned children hang off
+  `.riff-canvas` (`width: max-content; min-width: 100%`), *not* off the
+  `.riff-timeline` scroll viewport — the viewport's width equals the track's
+  only in the filling case, and using it left the playhead 19px off by beat 10
+  in a 760px box.
+- **Never `tracks[row]?.appendChild(group)`.** The note loop finds its rows
+  with `box.querySelectorAll(".riff-track")`, so the canvas must be attached
+  to `box` *before* that runs; a detached canvas makes the list empty, every
+  note computes a negative row index, and the optional chain discards **every
+  note** — the timeline renders bars, rows and no notes, with no error. An
+  out-of-range row falls back to `tracks[0]` so a group is always visible.
+  A note's position is its **exact beat** as a fraction of the loop, never
+  `round(beat / stepBeats)`: a tab event's beat *is* a column, but a chord
+  lands on a bar line, which is only on-grid when `beatsPerBar / step` is whole
+  (`bar 5` with `step 0.75` put a chord 15px from the playhead).
+
+`scripts/smoke.mjs` asserts all of the above as source shape (run against
+`dist/render.js` with comments stripped, so a comment *quoting* the old broken
+line does not read as the line still existing). **Layout still needs a browser
+to verify** — these checks cannot see a pixel, and the failure mode is
+invisible to every runtime signal. Measure with real `getBoundingClientRect()`
+comparing each note's *centre* to the playhead, at a width that scrolls and one
+that fills, and assert the note COUNT: a probe that skips missing notes reports
+"perfect" for an empty timeline.
 
 ## Structure
 

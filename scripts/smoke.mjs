@@ -676,6 +676,102 @@ throws(() => parseRiff("# only a comment", riffOpts), "empty riff throws");
     }
   }
 
+  // The timeline's horizontal geometry. This is a SOURCE-level check, because
+  // the bug it guards was invisible to every runtime signal: the playhead ran
+  // progressively behind the notes it passed (77px adrift by the last bar of
+  // the shipped riff) and nothing threw, warned, or logged. It only shows up
+  // as pixels, which is why it took a headless-browser measurement to find.
+  //
+  // The invariant: EVERYTHING horizontal is a FRACTION OF THE TRACK. Notes,
+  // bar marks, the loop region and the playhead must all measure from the same
+  // box in the same unit. It went wrong twice, in two different ways:
+  //
+  //  1. The track is `flex: 1 0 auto`, so it grows past its declared
+  //     `cols * --riff-step`. Notes (a `left: %`) followed it; the playhead,
+  //     loop region and bar marks multiplied a px `--riff-step` and did not.
+  //  2. `100%` is only the track's width if the containing block IS the
+  //     track. It was the scroll viewport, which differs whenever the track
+  //     grows to fill a wide panel or overflows a narrow one -- 19px adrift by
+  //     beat 10 in a 760px box. Hence `.riff-canvas`.
+  const css = await readFile(new URL("../style.css", import.meta.url), "utf8");
+  const renderSrc = await readFile(new URL("../dist/render.js", import.meta.url), "utf8");
+  // These are checks on CODE SHAPE, so run them on code with comments stripped:
+  // each of these fixes quotes the line it replaced (to say why it changed), and
+  // prose that mentions `tracks[anchorRow]?.` is not that call still existing.
+  const code = renderSrc.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
+  // A note sits at its exact beat, never a rounded column index. A tab event's
+  // beat IS a column so it is always on-grid, but a chord lands on a bar line,
+  // and a bar line is only on-grid when beatsPerBar / step is a whole number
+  // (`bar 5` with `step 0.75` put a chord 15px from the playhead's position).
+  check(
+    /group\.style\.left = `\$\{\(event\.beat \/ totalBeats\) \* 100\}%`/.test(code),
+    "a note is placed at its exact beat as a fraction of the loop",
+  );
+  check(
+    !/Math\.round\(event\.beat \/ stepBeats\)/.test(code),
+    "a note is not snapped to a whole column (that moved chords off their beat)",
+  );
+  check(
+    /--riff-bar-start", String\(\(bar \* beatsPerBar\) \/ totalBeats\)/.test(code),
+    "a bar mark is a fraction of the loop, not a step count",
+  );
+
+  // The positioned overlay hangs off a canvas whose width IS gutter + track,
+  // so `100%` means the track in both the filling and the scrolling case.
+  check(
+    /\.riff-canvas\s*\{[\s\S]*?width: max-content;[\s\S]*?min-width: 100%/.test(css),
+    ".riff-canvas is content-width with a viewport floor, so 100% is the track",
+  );
+  check(
+    /canvas\.appendChild\(head\)/.test(code) && /box\.appendChild\(canvas\)/.test(code),
+    "the playhead is a child of the canvas, not of the scroll viewport",
+  );
+  check(
+    /\.riff-playhead\s*\{[\s\S]*?left: calc\(var\(--riff-gutter\) \+ \(100% - var\(--riff-gutter\)\) \* var\(--riff-head-frac/.test(css),
+    "the playhead is placed as a fraction of the track width",
+  );
+  check(
+    /\.riff-loop\s*\{[\s\S]*?left: calc\(var\(--riff-gutter\) \+ \(100% - var\(--riff-gutter\)\) \* var\(--riff-loop-a/.test(css)
+      && /width: calc\(\(100% - var\(--riff-gutter\)\) \* \(var\(--riff-loop-b/.test(css),
+    "the loop region is placed as a fraction of the track width",
+  );
+  // The step gridline's period has to be 100%/cols of the track, or it drifts
+  // against the notes by exactly the amount the track grew.
+  check(
+    /repeating-linear-gradient\([\s\S]*?transparent 1px calc\(100% \/ var\(--riff-cols\)\)/.test(css),
+    "the step gridline's period is 100%/cols of the track, not a px step",
+  );
+  // The regression that actually bit: a px step multiplied into a position.
+  // `\s*\{` matters: without it this also matches `.riff-bar-track, .riff-track`,
+  // whose `--riff-step` is the track's declared minimum WIDTH, not a position.
+  const pxPositioned = [...css.matchAll(/^\.(riff-(?:playhead|loop|bar))\s*\{([^}]*)\}/gm)]
+    .filter(([, , body]) => /left|width/.test(body) && /var\(--riff-step\)/.test(body))
+    .map(([, sel]) => sel);
+  // The canvas must be attached BEFORE the note loop looks its rows up through
+  // it. A detached canvas makes `querySelectorAll(".riff-track")` empty, every
+  // note computes a negative row index, and `tracks[anchorRow]?.appendChild`
+  // discards all of them -- the timeline renders bars and rows and NO notes,
+  // with nothing thrown and nothing logged. (Cost me one round of exactly
+  // that: a geometry probe reported "perfect" because it skipped missing
+  // notes, so zero notes read as zero drift.)
+  const attachAt = code.indexOf("box.appendChild(canvas)");
+  const tracksAt = code.indexOf('const tracks = box.querySelectorAll');
+  check(
+    attachAt !== -1 && tracksAt !== -1 && attachAt < tracksAt,
+    `the canvas is attached before the note loop queries it (attach @${attachAt}, query @${tracksAt})`,
+  );
+  // And the note loop must not be able to drop a group silently: every event
+  // has to reach a real row.
+  check(
+    !/tracks\[anchorRow\]\?\./.test(code),
+    "a note group is appended to a row unconditionally, not via a silent optional chain",
+  );
+  check(
+    pxPositioned.length === 0,
+    `no playhead/loop/bar rule positions itself with a px --riff-step (${pxPositioned.join(", ") || "none do"})`,
+  );
+
   // The ear-check page embeds its own copy of the default so it can run the
   // real parser. Two copies of an example WILL drift, so require them equal.
   const earCheck = await readFile(new URL("../debug/riff-debug.html", import.meta.url), "utf8");

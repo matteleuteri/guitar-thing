@@ -332,7 +332,22 @@ export function renderRiffTimeline(
   options: RiffTimelineOptions,
 ): HTMLElement {
   const { tuning } = options;
+  // The scroll viewport. It holds exactly one child, the canvas.
   const box = el("div", "riff-timeline");
+  // Everything that is positioned hangs off the CANVAS, not the viewport.
+  // `100%` has to mean the TRACK's width for the playhead/loop math to be
+  // right, and the track is not always the viewport's width: it grows to fill
+  // a wide panel and overflows a narrow one (then the box scrolls). Measuring
+  // against the viewport put the playhead 19px off by beat 10 in a 760px box.
+  // `width: max-content; min-width: 100%` makes the canvas exactly as wide as
+  // its content in the scrolling case and at least as wide as the viewport in
+  // the filling case -- and in both, canvas = gutter + track.
+  const canvas = el("div", "riff-canvas");
+  // Attached IMMEDIATELY: the note loop finds its rows with
+  // `box.querySelectorAll(".riff-track")`, and a detached canvas would make
+  // that an empty list -- every note then computed a negative row index and
+  // `tracks[anchorRow]?.appendChild(...)` dropped it on the floor, silently.
+  box.appendChild(canvas);
   const stringCount = tuning.length;
   // One column per step; the final column carries the bar that starts there so
   // a long riff still gets a sensible width.
@@ -346,11 +361,13 @@ export function renderRiffTimeline(
   const barTrack = el("div", "riff-bar-track");
   for (let bar = 0; bar * beatsPerBar < totalBeats; bar++) {
     const cell = el("div", "riff-bar", String(bar + 1));
-    cell.style.setProperty("--riff-bar-start", String((bar * beatsPerBar) / stepBeats));
+    // A fraction of the loop, the same unit a note's `left: %` uses -- not a
+    // step count, which would have to be multiplied by a px step size to match.
+    cell.style.setProperty("--riff-bar-start", String((bar * beatsPerBar) / totalBeats));
     barTrack.appendChild(cell);
   }
   ruler.appendChild(barTrack);
-  box.appendChild(ruler);
+  canvas.appendChild(ruler);
 
   // Loop region, drawn behind the notes. Positions are fractions handed to CSS
   // as custom properties so the gutter is accounted for exactly (a plain
@@ -359,7 +376,7 @@ export function renderRiffTimeline(
     const region = el("div", "riff-loop");
     region.style.setProperty("--riff-loop-a", String(options.loop.start / totalBeats));
     region.style.setProperty("--riff-loop-b", String(options.loop.end / totalBeats));
-    box.appendChild(region);
+    canvas.appendChild(region);
   }
 
   // One row per string, high E first, like reading tab.
@@ -370,15 +387,21 @@ export function renderRiffTimeline(
     // width is the full step grid, so a note's `left: %` lands exactly on its
     // beat — no per-step children needed.
     row.appendChild(el("div", "riff-track"));
-    box.appendChild(row);
+    canvas.appendChild(row);
   }
 
   // Notes, placed on their string's row at their step.
   const tracks = box.querySelectorAll<HTMLElement>(".riff-track");
   events.forEach((event, index) => {
-    const step = Math.round(event.beat / stepBeats);
     const group = el("div", event.notes.length > 1 ? "riff-note riff-chord" : "riff-note");
-    group.style.left = `${(step / stepCount) * 100}%`;
+    // The event's EXACT beat as a fraction of the loop -- the same unit the
+    // playhead, the bar marks and the loop region use. It used to be a rounded
+    // column index (`round(beat / stepBeats) / stepCount`), which silently
+    // snapped a note up to half a column away from where the playhead and its
+    // own bar mark sit. A tab event is always on-grid (its beat IS a column),
+    // but a chord lands on a bar line, and a bar line is only on-grid when
+    // beatsPerBar / step is a whole number -- e.g. `bar 5` with `step 0.75`.
+    group.style.left = `${(event.beat / totalBeats) * 100}%`;
     group.title = `${event.label} — bar ${Math.floor(event.beat / beatsPerBar) + 1}, beat ${(event.beat % beatsPerBar) + 1}`;
     group.dataset.index = String(index);
     for (const note of event.notes) {
@@ -395,12 +418,22 @@ export function renderRiffTimeline(
     }
     // A multi-string event is one group; anchor it to its topmost (highest
     // sounding) string so a strummed chord hangs together.
-    const anchorRow = tracks.length - 1 - Math.max(...event.notes.map((n) => n.stringIndex));
-    tracks[anchorRow]?.appendChild(group);
+    if (tracks.length) {
+      const anchorRow = tracks.length - 1 - Math.max(...event.notes.map((n) => n.stringIndex));
+      // Deliberately NOT `tracks[anchorRow]?.appendChild(...)`. That optional
+      // chain is what silently swallowed every note when this ran against a
+      // detached canvas: an out-of-range index dropped the group with nothing
+      // thrown, and the timeline showed bars and rows and no notes at all. A
+      // row index outside the grid means the note's string is not in this
+      // tuning, so fall back to the top row -- the group stays VISIBLE, which
+      // is what makes that mistake obvious instead of invisible.
+      const row = tracks[anchorRow] ?? tracks[0];
+      row.appendChild(group);
+    }
   });
 
   const head = el("div", "riff-playhead");
-  box.appendChild(head);
+  canvas.appendChild(head);
   return box;
 }
 

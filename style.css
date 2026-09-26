@@ -120,11 +120,19 @@ header p { color: var(--muted); max-width: 70ch; margin-top: .25rem; }
    left gutter (string letter) + a track; the track's own background is a
    repeating gradient so bars and steps line up without extra elements. */
 .riff-timeline {
-  position: relative;
   --riff-gutter: 1.4rem;
   --riff-step: 1.5rem;
-  padding: .3rem 0;
   overflow-x: auto;
+}
+/* The positioned children (bar marks, loop region, notes, playhead) all measure
+   percentages against THIS box, so it must be the track's width -- not the
+   scroll viewport's, which differs whenever the track grows to fill a wide
+   panel or overflows a narrow one. */
+.riff-canvas {
+  position: relative;
+  width: max-content;
+  min-width: 100%;
+  padding: .3rem 0;
 }
 .riff-ruler, .riff-row {
   display: flex;
@@ -144,6 +152,10 @@ header p { color: var(--muted); max-width: 70ch; margin-top: .25rem; }
   flex: 1 0 auto;
   width: calc(var(--riff-cols) * var(--riff-step));
 }
+/* The step gridline. Its period is 100%/cols OF THIS BOX, not a px literal:
+   the track is `flex: 1 0 auto`, so it grows past `cols * --riff-step` to fill
+   the panel, which made the real step wider than the declared one. A px period
+   then drifted against the notes (see the note/playhead invariant below). */
 .riff-track {
   height: 1.5rem;
   border-bottom: 1px solid rgba(255, 255, 255, .05);
@@ -151,12 +163,12 @@ header p { color: var(--muted); max-width: 70ch; margin-top: .25rem; }
     repeating-linear-gradient(
       to right,
       rgba(255, 255, 255, .07) 0 1px,
-      transparent 1px var(--riff-step)
+      transparent 1px calc(100% / var(--riff-cols))
     );
 }
 .riff-bar {
   position: absolute;
-  left: calc(var(--riff-bar-start) * var(--riff-step));
+  left: calc(var(--riff-bar-start, 0) * 100%);
   top: 0;
   font-family: ui-monospace, monospace;
   font-size: .65rem;
@@ -167,8 +179,8 @@ header p { color: var(--muted); max-width: 70ch; margin-top: .25rem; }
   position: absolute;
   top: 1.1rem;
   bottom: .3rem;
-  left: calc(var(--riff-gutter) + var(--riff-cols) * var(--riff-step) * var(--riff-loop-a, 0));
-  width: calc(var(--riff-cols) * var(--riff-step) * (var(--riff-loop-b, 0) - var(--riff-loop-a, 0)));
+  left: calc(var(--riff-gutter) + (100% - var(--riff-gutter)) * var(--riff-loop-a, 0));
+  width: calc((100% - var(--riff-gutter)) * (var(--riff-loop-b, 0) - var(--riff-loop-a, 0)));
   background: rgba(76, 194, 255, .07);
   border-left: 1px solid rgba(76, 194, 255, .35);
   border-right: 1px solid rgba(76, 194, 255, .35);
@@ -201,7 +213,7 @@ header p { color: var(--muted); max-width: 70ch; margin-top: .25rem; }
   top: 1.1rem;
   bottom: .3rem;
   width: 2px;
-  left: calc(var(--riff-gutter) + var(--riff-cols) * var(--riff-step) * var(--riff-head-frac, 0));
+  left: calc(var(--riff-gutter) + (100% - var(--riff-gutter)) * var(--riff-head-frac, 0));
   background: var(--accent);
   box-shadow: 0 0 6px rgba(76, 194, 255, .8);
   pointer-events: none;
