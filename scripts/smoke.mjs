@@ -459,6 +459,19 @@ throws(() => parseRiff("# only a comment", riffOpts), "empty riff throws");
     }
   }
 
+  // The ear-check page embeds its own copy of the default so it can run the
+  // real parser. Two copies of an example WILL drift, so require them equal.
+  const earCheck = await readFile(new URL("../debug/riff-debug.html", import.meta.url), "utf8");
+  const embedded = earCheck.match(/const DEFAULT_TEXT = `([\s\S]*?)`;/);
+  check(embedded !== null, "riff-debug.html embeds a default notation");
+  if (shipped && embedded) {
+    const norm = (t) => t.replace(/^\s*\n/, "").replace(/\s+$/, "");
+    check(
+      norm(embedded[1]) === norm(shipped[1]),
+      "riff-debug.html and index.html agree on the default notation",
+    );
+  }
+
   // Every fenced notation block in the docs that carries tab lanes must parse.
   for (const [name, doc] of [
     ["README.md", readme],

@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Riff ear check</title>
+  <style>
+    body { font-family: ui-monospace, monospace; background: #141414; color: #d8d8d8; margin: 0; padding: 16px; }
+    h1 { font-size: 15px; margin: 0 0 6px; color: #8ec9ff; }
+    h2 { font-size: 12px; margin: 18px 0 4px; color: #8ec9ff; text-transform: uppercase; letter-spacing: .06em; }
+    p.hint { font-size: 11px; margin: 0 0 12px; color: #888; max-width: 80ch; }
+    .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+    button { background: #2a2a2a; color: #e6e6e6; border: 1px solid #444; border-radius: 4px; padding: 5px 12px; font: inherit; font-size: 12px; cursor: pointer; }
+    button:hover { background: #3a3a3a; }
+    button.stop { border-color: #a33; }
+    label { font-size: 11px; color: #888; }
+    input[type="range"] { width: 200px; accent-color: #8ec9ff; }
+    textarea { background: #0c0c0c; color: #e6e6e6; border: 1px solid #333; border-radius: 4px; padding: 8px; font: inherit; font-size: 12px; width: 100%; max-width: 90ch; min-height: 90px; }
+    pre { font-size: 11px; line-height: 1.5; background: #0c0c0c; border: 1px solid #333; padding: 8px; min-height: 40px; white-space: pre-wrap; margin: 4px 0 0; }
+    table { border-collapse: collapse; font-size: 11px; margin-top: 4px; }
+    td, th { border: 1px solid #2a2a2a; padding: 2px 7px; text-align: left; }
+    th { color: #888; font-weight: 400; }
+    .gate-ok { color: #7bd88f; }
+    .gate-bad { color: #ff8a7a; }
+    .case { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .case label { min-width: 190px; color: #bbb; }
+  </style>
+</head>
+<body>
+  <h1>Riff ear check</h1>
+  <p class="hint">
+    Every button here runs the <b>same code path as the app</b> — <code>parseRiff</code>,
+    <code>RiffTransport</code> and <code>playVoicing</code> — so what you hear is what Riff mode does.
+    The numbers printed under each case are the scheduling ground truth, already proven by
+    <code>npm test</code>; they are here so your ears and the measurements can be compared.
+    Only the judgements need you: does it sound like a guitar, and does it sound musical.
+  </p>
+
+  <h2>0 · Engine gate (read this first, no ears needed)</h2>
+  <div class="row">
+    <button id="reload">Reload page</button>
+    <button id="stopAll" class="stop">Stop all audio</button>
+    <span id="engStatus">checking…</span>
+  </div>
+  <pre id="engOut">Waiting for the kit to decode. The steel kit is 2.6 MB and decodes on page
+load, so give it a second after a fresh reload before judging anything.</pre>
+
+  <h2>1 · The default riff, exactly as shipped</h2>
+  <p class="hint">The textarea default from <code>index.html</code>: a C&thinsp;Am&thinsp;F&thinsp;G chord line plus an 8-note melody, 96&nbsp;bpm, strum 55&nbsp;ms, release 400&nbsp;ms, looping.</p>
+  <div class="row">
+    <button id="playDefault">Play ▶</button>
+    <button id="playDefaultOnce" class="stop">Stop</button>
+    <label>Speed
+      <input type="range" id="speed" min="25" max="200" step="5" value="100" />
+      <span id="speedLabel">100%</span>
+    </label>
+  </div>
+  <pre id="defaultOut">—</pre>
+
+  <h2>2 · Note length / damping (the newest, least-tested feature)</h2>
+  <p class="hint">Same chord, same strum, only the note length changes. <b>Listen for:</b> does
+  <code>ring</code> overlap into the next hit, and do the shorter ones end like a real note
+  stopping — or do they click, chop abruptly, or sound like a cut-off sample?</p>
+  <div class="row case">
+    <label>ring (release 0)</label><button data-release="0">Play</button>
+    <label>release 200</label><button data-release="200">Play</button>
+    <label>release 400 (default)</label><button data-release="400">Play</button>
+    <label>release 900</label><button data-release="900">Play</button>
+  </div>
+  <pre id="releaseOut">—</pre>
+
+  <h2>3 · Strum width (0 must be one instant)</h2>
+  <p class="hint">One open C, played three times. <b>Listen for:</b> <code>0</code> should be a
+  single solid chunk; <code>55</code> a natural hand-rolled strum; <code>300</code> a slow
+  arpeggio. If <code>0</code> still sounds rolled or smeared, the jitter fix regressed.</p>
+  <div class="row case">
+    <label>strum 0 (blocked)</label><button data-strum="0">Play</button>
+    <label>strum 55 (hand)</label><button data-strum="55">Play</button>
+    <label>strum 300 (arpeggio)</label><button data-strum="300">Play</button>
+  </div>
+  <pre id="strumOut">—</pre>
+
+  <h2>4 · Kit A/B</h2>
+  <p class="hint">The same chord on each engine. Useful if the steel kit ever sounds wrong and
+  you want to know whether it is the kit or the engine.</p>
+  <div class="row case">
+    <label><input type="radio" name="kit" value="steel" checked /> steel</label>
+    <label><input type="radio" name="kit" value="nylon" /> nylon</label>
+    <button id="playKit">Play chord on this kit</button>
+  </div>
+  <pre id="kitOut">—</pre>
+
+  <h2>5 · Your report</h2>
+  <p class="hint">Type what you heard next to each case, then copy it back. Keeping these notes
+  in a commit is what stops the same question being re-litigated later.</p>
+  <div class="row">
+    <button id="copy">Copy report</button>
+    <button id="seed">Pre-fill case names</button>
+  </div>
+  <textarea id="report" spellcheck="false"></textarea>
+
+  <script type="module">
+    import { parseRiff, secondsPerBeat } from "../dist/riff.js";
+    import { RiffTransport } from "../dist/transport.js";
+    import {
+      playVoicing, stopAudio, primeAudio, audioNow,
+      getAudioDebugEvents, getSmplrStatus, configSnapshot,
+      setGuitarKit,
+    } from "../dist/audio.js";
+
+    const TUNING = [40, 45, 50, 55, 59, 64];
+    const OPEN_C = [0, 3, 2, 0, 1, 0];
+    const $ = (id) => document.getElementById(id);
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+    // The textarea default, copied from index.html so this page and the app
+    // cannot silently drift. scripts/smoke.mjs asserts both parse.
+    const DEFAULT_TEXT = `tempo 96
+strum 55
+release 400
+C Am F G
+e|5---5---7---7---8---8---7---5---|
+B|----------------3---5---5---3---|
+G|--------------------------------|`;
+
+    const riff = parseRiff(DEFAULT_TEXT, { tuning: TUNING, maxFrets: 24, span: 5 });
+    let transport = null;
+
+    function stop() {
+      if (transport) { transport.stop(); transport = null; }
+      stopAudio();
+    }
+
+    // ---- engine gate -------------------------------------------------------
+    async function engineStatus() {
+      await primeAudio();
+      const s = getSmplrStatus();
+      const ready = s.ready;
+      $("engStatus").innerHTML = ready
+        ? '<span class="gate-ok">kit READY</span>'
+        : s.loading
+          ? '<span class="gate-bad">kit decoding…</span>'
+          : '<span class="gate-bad">kit NOT ready — you are hearing a fallback</span>';
+      $("engOut").textContent =
+        `mode=${s.mode} ready=${s.ready} loading=${s.loading} progress=${s.progress}\n` +
+        `audio clock = ${audioNow().toFixed(2)}s\n` +
+        (ready
+          ? "Good. Everything below routes to the kit. Judge timbre here."
+          : "WAIT and reload, or the release/strum cases are testing a fallback, not the kit.");
+    }
+    $("reload").onclick = () => location.reload();
+    $("stopAll").onclick = stop;
+    engineStatus();
+    setInterval(engineStatus, 1200);
+
+    // ---- 1. the default riff ----------------------------------------------
+    $("speed").oninput = (e) => { $("speedLabel").textContent = `${e.target.value}%`; };
+
+    async function playDefault(loop) {
+      stop();
+      await primeAudio();
+      const scale = Math.min(200, Math.max(25, parseInt($("speed").value, 10) || 100)) / 100;
+      const spb = secondsPerBeat(riff, scale);
+      const t0 = audioNow();
+      const fired = [];
+      transport = new RiffTransport(riff, spb, {
+        now: audioNow,
+        onEvent: (event, when) => {
+          fired.push({ label: event.label, at: when - t0, notes: event.notes.length });
+          playVoicing(event.frets, TUNING, { when, strumMs: event.strumMs, releaseMs: riff.releaseMs });
+        },
+      });
+      if (!loop) transport.setLoop(0, Math.min(riff.totalBeats, riff.beatsPerBar));
+      transport.play();
+      const secs = (riff.totalBeats * spb).toFixed(2);
+      $("defaultOut").textContent =
+        `${riff.events.length} events (${riff.events.filter((e) => e.kind === "chord").length} chord, ` +
+        `${riff.events.filter((e) => e.kind === "note").length} tab) over ${riff.totalBeats} beats ` +
+        `= ${secs}s at ${riff.bpm} bpm x ${scale.toFixed(2)}\n` +
+        `loop ${riff.loop.start}..${riff.loop.end} beats — click "Play" to hear it ${loop ? "loop" : "once"}\n` +
+        (fired.length
+          ? "scheduled so far:\n" + fired.map((f) => `  ${f.at.toFixed(3).padStart(7)}s  ${f.label} (${f.notes})`).join("\n")
+          : "");
+      if (loop) {
+        setTimeout(() => { $("defaultOut").textContent += "\n(looping — press Stop)"; }, secs * 1000);
+      }
+    }
+    $("playDefault").onclick = () => playDefault(true);
+    $("playDefaultOnce").onclick = () => playDefault(false);
+
+    // ---- 2/3. one-shot cases with the scheduling shown ---------------------
+    async function oneShot(frets, opts, outId) {
+      stop();
+      await primeAudio();
+      const before = getAudioDebugEvents().length;
+      const when = audioNow() + 0.25;
+      playVoicing(frets, TUNING, { when, ...opts });
+      await sleep(500);
+      const evs = getAudioDebugEvents().slice(before);
+      const times = evs.map((e) => e.time - when).sort((a, b) => a - b);
+      const spread = times.length ? times[times.length - 1] - times[0] : 0;
+      $(outId).textContent =
+        `${evs.length} notes, engine=${evs[0] ? evs[0].kind : "?"}\n` +
+        `on-set spread = ${(spread * 1000).toFixed(1)}ms ` +
+        `(first ${(times[0] * 1000).toFixed(1)}ms, last ${(times[times.length - 1] * 1000).toFixed(1)}ms)\n` +
+        `notes: ${evs.map((e) => `${e.freq ? e.freq.toFixed(0) + "Hz" : e.midi + "?"} role=${e.role ?? "-"}`).join(", ")}`;
+    }
+
+    for (const btn of document.querySelectorAll("[data-release]")) {
+      btn.onclick = () => {
+        const ms = parseInt(btn.dataset.release, 10);
+        oneShot(OPEN_C, { strumMs: 0, releaseMs: ms }, "releaseOut");
+        $("releaseOut").textContent = `playing release ${ms}ms…`;
+      };
+    }
+    for (const btn of document.querySelectorAll("[data-strum]")) {
+      btn.onclick = () => {
+        const ms = parseInt(btn.dataset.strum, 10);
+        oneShot(OPEN_C, { strumMs: ms }, "strumOut");
+        $("strumOut").textContent = `playing strum ${ms}ms…`;
+      };
+    }
+
+    // ---- 4. kit A/B --------------------------------------------------------
+    $("playKit").onclick = async () => {
+      stop();
+      const kit = document.querySelector('input[name="kit"]:checked').value;
+      setGuitarKit(kit);
+      await primeAudio();
+      await sleep(400);
+      const before = getAudioDebugEvents().length;
+      playVoicing(OPEN_C, TUNING, { when: audioNow() + 0.2 });
+      await sleep(600);
+      const evs = getAudioDebugEvents().slice(before);
+      $("kitOut").textContent =
+        `kit=${getSmplrStatus().kit ?? kit} status=${JSON.stringify(getSmplrStatus())}\n` +
+        `played ${evs.length} notes, engine=${evs[0] ? evs[0].kind : "none"}`;
+    };
+
+    // ---- 5. report ---------------------------------------------------------
+    $("seed").onclick = () => {
+      $("report").value = [
+        "ENGINE: kit ready? yes/no — heard:",
+        "",
+        "1 DEFAULT RIFF (4 bars, C Am F G + melody):",
+        "   sounds like a guitar?      feels like a real part?",
+        "   anything muddy/wrong/clicky?",
+        "",
+        "2 RELEASE: ring / 200 / 400 / 900 —",
+        "   does 400 end like a real note stopping, or click/chop?",
+        "   is there overlap you want?",
+        "",
+        "3 STRUM: 0 / 55 / 300 —",
+        "   is 0 one solid chunk (not rolled)?",
+        "   is 55 the most natural?",
+        "",
+        "4 KIT: steel vs nylon —",
+        "",
+        "TIMELINE (visual, in the app at :5173):",
+        "   notes line up with the bars? playhead moves?",
+        "",
+        "TOP 3 THINGS THAT SOUND WRONG:",
+        "1.",
+        "2.",
+        "3.",
+      ].join("\n");
+    };
+    $("copy").onclick = async () => {
+      try { await navigator.clipboard.writeText($("report").value); $("copy").textContent = "Copied"; }
+      catch { $("copy").textContent = "Copy failed — select and copy manually"; }
+      setTimeout(() => { $("copy").textContent = "Copy report"; }, 1500);
+    };
+    $("seed").click();
+  </script>
+</body>
+</html>
