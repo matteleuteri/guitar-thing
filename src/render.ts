@@ -405,14 +405,19 @@ export function renderRiffTimeline(
 
 /**
  * The "what will I actually hear" list, in the order the ear gets it: one row
- * per event, grouped under its bar, with the bar, the beat inside it, the
- * seconds from the top, and the sounding note names.
+ * per MOMENT, grouped under its bar, with the beat inside the bar, the seconds
+ * from the top, what the notation printed, and the sounding note names.
  *
  * The thing this exists to answer is the one the notation box hides: a chord
  * line is one token (`C`) and the app invents a shape for it, so "C" and
  * "e|--5---|" both look equally vague on the page. Here the invented shape is
  * spelled out — frets per string, then the notes — so a mis-voice is visible
  * without pressing play. Rows are clickable like the timeline's note groups.
+ *
+ * A chord and a tab note on the same beat are ONE row, not two. They are one
+ * moment, and printing them as two rows at the same time read as a duplicated
+ * entry rather than as the thing it is — a chord with a melody note on top.
+ * The app decides the layering, so the row says which: `with A4 on top`.
  */
 export function renderRiffReading(
   events: RiffEvent[],
@@ -422,14 +427,24 @@ export function renderRiffReading(
     stepBeats: number;
     totalBeats: number;
     tuning: number[];
-    onPlayEvent?: (index: number) => void;
+    onPlayEvents?: (indices: number[]) => void;
   },
 ): HTMLElement {
-  const { tuning, beatsPerBar, onPlayEvent } = options;
+  const { tuning, beatsPerBar, onPlayEvents } = options;
+  const sounded = (event: RiffEvent) =>
+    event.notes.map((note) => midiName(tuning[note.stringIndex] + note.fret)).join(" ");
+  // One moment per row. Events are already beat-sorted, and only a chord and a
+  // tab event can share a beat, so a run of equal beats is the whole chord.
+  const moments: { beat: number; indices: number[] }[] = [];
+  events.forEach((event, index) => {
+    const last = moments[moments.length - 1];
+    if (last && Math.abs(last.beat - event.beat) < 1e-9) last.indices.push(index);
+    else moments.push({ beat: event.beat, indices: [index] });
+  });
   // A long riff is a wall of rows, and the timeline below is the overview, so
   // cap the detail rather than burying the transport controls.
   const cap = 64;
-  const shown = events.slice(0, cap);
+  const shown = moments.slice(0, cap);
   const box = el("details", "riff-reading") as HTMLDetailsElement;
   const seconds = (beat: number) => (beat * 60) / options.bpm;
   const time = (beat: number) => `${seconds(beat).toFixed(2)}s`;
@@ -444,8 +459,8 @@ export function renderRiffReading(
 
   const list = el("div", "riff-reading-list");
   let bar = -1;
-  shown.forEach((event, index) => {
-    const eventBar = Math.floor(event.beat / beatsPerBar);
+  for (const moment of shown) {
+    const eventBar = Math.floor(moment.beat / beatsPerBar);
     if (eventBar !== bar) {
       bar = eventBar;
       const head = el("div", "riff-reading-bar");
@@ -453,43 +468,75 @@ export function renderRiffReading(
       head.appendChild(el("span", "riff-reading-bar-time", time(bar * beatsPerBar)));
       list.appendChild(head);
     }
+    const here = moment.indices.map((index) => events[index]);
+    const chord = here.find((event) => event.kind === "chord");
+    const over = here.filter((event) => event.kind !== "chord");
     const row = el("div", "riff-reading-row");
-    row.dataset.index = String(index);
-    row.appendChild(el("span", "riff-reading-beat", `${(event.beat % beatsPerBar) + 1}`));
-    row.appendChild(el("span", "riff-reading-time", time(event.beat)));
-    // What the page said (`C`, `e5 8`, `5`) — kept verbatim so a row can be
-    // matched back to a column of the notation by eye.
-    row.appendChild(el("span", "riff-reading-label", event.label));
-    const sounded = event.notes
-      .map((note) => midiName(tuning[note.stringIndex] + note.fret))
-      .join(" ");
-    row.appendChild(el("span", "riff-reading-notes", sounded));
-    // Where the shape came from. A chord row is the only one the app invented,
-    // and a chord line plus a tab lane at the same beat prints as TWO rows at
-    // the same beat/time — so each row says which notation produced it.
-    const source =
-      event.kind === "chord"
-        ? "chord, auto-voiced"
-        : event.strumMs > 0
-          ? `tab, strum ${event.strumMs}ms`
-          : "tab";
+    row.appendChild(el("span", "riff-reading-beat", `${(moment.beat % beatsPerBar) + 1}`));
+    row.appendChild(el("span", "riff-reading-time", time(moment.beat)));
+    // What the page said (`C` + `e5`, or just `5`) — kept verbatim so a row can
+    // be matched back to a column of the notation by eye.
+    row.appendChild(el("span", "riff-reading-label", here.map((event) => event.label).join(" + ")));
+    const bed = chord ? sounded(chord) : "";
+    const onTop = over.map(sounded).join(" + ");
+    const detail = chord && onTop ? `${bed} with ${onTop} on top` : chord ? bed : onTop;
+    row.appendChild(el("span", "riff-reading-notes", detail));
+    // Where the shape came from, which is the only part the app invented.
+    const source = chord
+      ? over.length
+        ? "chord + tab"
+        : "chord, auto-voiced"
+      : over.some((event) => event.strumMs > 0)
+        ? `tab, strum ${over.find((event) => event.strumMs > 0)!.strumMs}ms`
+        : "tab";
     row.appendChild(el("span", "riff-reading-voiced", source));
-    if (onPlayEvent) {
+    if (onPlayEvents) {
       row.classList.add("riff-clickable");
       row.addEventListener("click", (e) => {
         e.stopPropagation();
-        onPlayEvent(index);
+        onPlayEvents(moment.indices);
       });
     }
     list.appendChild(row);
-  });
+  }
   box.appendChild(list);
-  if (events.length > shown.length) {
+  if (moments.length > shown.length) {
     box.appendChild(
-      el("div", "muted riff-reading-more", `+ ${events.length - shown.length} more events — use the timeline below.`),
+      el("div", "muted riff-reading-more", `+ ${moments.length - shown.length} more events — use the timeline below.`),
     );
   }
   return box;
+}
+
+/**
+ * The bar ruler that sits directly above the notation box.
+ *
+ * This is the shared axis the two layers of the notation were missing: a chord
+ * line is one token per BAR and a tab lane is one CHARACTER per column, so
+ * nothing in the text showed where a bar boundary actually falls, and the one
+ * thing worth understanding — that `C` and the tab's first column are the same
+ * instant — had to be counted out by hand.
+ *
+ * It is aligned by CHARACTER, not by pixels: the box is monospace, so one
+ * character is exactly one `ch` here too, and every offset is a `ch` count.
+ * That holds as long as the ruler and the textarea share a font-size, a
+ * font-family and a left padding, which is why the CSS pins all three to the
+ * same custom properties instead of repeating literals.
+ */
+export function renderRiffGrid(beatsPerBar: number, stepBeats: number, totalBeats: number): HTMLElement[] {
+  const perBar = Math.max(1, Math.round(beatsPerBar / stepBeats));
+  // A lane body starts after its `e|`, so tab column 0 is character 2.
+  const LANE_PREFIX = 2;
+  const bars = Math.max(1, Math.round(totalBeats / beatsPerBar));
+  const marks: HTMLElement[] = [];
+  for (let bar = 0; bar < bars; bar++) {
+    const mark = el("div", "riff-grid-bar");
+    mark.style.left = `${LANE_PREFIX + bar * perBar}ch`;
+    mark.appendChild(el("span", "riff-grid-num", String(bar + 1)));
+    marks.push(mark);
+  }
+  marks.push(el("div", "riff-grid-note", "bar"));
+  return marks;
 }
 
 /** Move the playhead to a beat (fractional beats allowed). */

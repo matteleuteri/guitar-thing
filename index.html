@@ -91,21 +91,23 @@
       <div id="riff-only" hidden>
         <div class="field field-wide">
           <label for="riff-text">Riff</label>
+          <div class="riff-grid" id="riff-grid" aria-hidden="true"></div>
           <textarea id="riff-text" rows="9" spellcheck="false" title="Chord stream and/or tab lanes. Directives: tempo|bpm, bar, step|grid, strum, release — see 'How to write this' below.">tempo 96
 strum 55
-C Am F G
+  C       Am      F       G
 e|5---5---7---7---8---8---7---5---|
 B|----------------3---5---5---3---|
 G|--------------------------------|
 </textarea>
         </div>
         <details class="riff-legend">
-          <summary>How to write this — syntax, grid and what plays</summary>
+          <summary>How to write this — syntax, the bar ruler, and what plays</summary>
           <div class="riff-legend-body">
             <ul>
-              <li>A <strong>chord line</strong> is one chord per bar. Spaces or <code>|</code> both work: <code>C Am F G</code> or <code>C|Am|F|G</code>.</li>
+              <li>A <strong>chord line</strong> is one chord per bar, read left to right. Spaces or <code>|</code> both work, and the spacing is yours to choose — see the bar ruler below.</li>
               <li>A <strong>tab lane</strong> is <code>LANE|</code> plus the notes, one per character column: <code>e|5---7---|</code>. Lanes are <code>e B G D A E</code>.</li>
-              <li><strong>Both play at once.</strong> A chord line and a tab lane at the same beat are added together, which is how a chord under a melody is written.</li>
+              <li><strong>They play together, not instead of each other.</strong> A chord and a tab note on the same beat sound as one moment: the chord with the note <em>on top of it</em>, exactly as you'd strum it. The "What you'll hear" list under the box spells that out as <code>C + 5 → E3 G3 C4 with A4 on top</code>.</li>
+              <li>The <strong>bar ruler</strong> above the box is the shared grid: each number sits at the character where that bar starts, two characters along (a tab column starts after the <code>e|</code>). Pad the chord line so its tokens land on those numbers and both layers line up — it changes nothing you hear, it just makes the alignment visible. <code>C Am F G</code> and <code>C&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Am</code> are the same four chords.</li>
               <li>Space, <code>-</code>, <code>.</code> and <code>_</code> are rests. <code>x</code> is a muted string. A two-digit fret uses two columns, so <code>10</code> is wider than <code>9</code>.</li>
               <li>Every lane must be the <strong>same number of characters</strong> — pad the short ones with dashes, or a bar shifts sideways.</li>
             </ul>

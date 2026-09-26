@@ -2,7 +2,7 @@ import { stopAudio, playNotes, playVoicing, preloadGuitarEngine, primeAudio, aud
 import { DEFAULT_CONFIG } from "./synth/config.js";
 import { findFingerings, type Fingering } from "./fretboard.js";
 import { findPianoVoicings, type PianoVoicing } from "./piano.js";
-import { colorFor, el, renderChordDiagram, renderPiano, renderPianoVoicing, renderPositions, renderRiffReading, renderRiffTimeline, setRiffPlayhead } from "./render.js";
+import { colorFor, el, renderChordDiagram, renderPiano, renderPianoVoicing, renderPositions, renderRiffGrid, renderRiffReading, renderRiffTimeline, setRiffPlayhead } from "./render.js";
 import { parseRiff, secondsPerBeat, stepName, type Riff, type RiffEvent } from "./riff.js";
 import { RiffTransport } from "./transport.js";
 import {
@@ -55,6 +55,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const songOnly = document.getElementById("song-only") as HTMLDivElement;
   const riffOnly = document.getElementById("riff-only") as HTMLDivElement;
   const riffText = document.getElementById("riff-text") as HTMLTextAreaElement;
+  const riffGrid = document.getElementById("riff-grid") as HTMLDivElement;
   const riffScale = document.getElementById("riff-scale") as HTMLInputElement;
   const riffLoopStart = document.getElementById("riff-loop-start") as HTMLInputElement;
   const riffLoopEnd = document.getElementById("riff-loop-end") as HTMLInputElement;
@@ -527,6 +528,7 @@ document.addEventListener("DOMContentLoaded", () => {
     } catch (e) {
       chordSummary.textContent = "";
       setError(e instanceof Error ? e.message : String(e));
+      riffGrid.replaceChildren();
       riffPlan = null;
       riffTimeline = null;
       return null;
@@ -549,10 +551,17 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     const loop = riffLoop(riff);
-    const playEvent = (index: number) => {
-      const event = riff.events[index];
-      if (event) playVoicing(event.frets, params.tuning, { strumMs: event.strumMs, releaseMs: riff.releaseMs });
+    const playEvents = (indices: number[]) => {
+      for (const index of indices) {
+        const event = riff.events[index];
+        if (event) playVoicing(event.frets, params.tuning, { strumMs: event.strumMs, releaseMs: riff.releaseMs });
+      }
     };
+    const playEvent = (index: number) => playEvents([index]);
+
+    // The ruler is the two layers' shared axis, so it is rebuilt with the plan:
+    // `bar` and `step` both move the bar boundaries.
+    riffGrid.replaceChildren(...renderRiffGrid(riff.beatsPerBar, riff.stepBeats, riff.totalBeats));
 
     // Keep the reader's own collapse choice across re-renders: it is rebuilt on
     // every keystroke, and a `<details>` that springs open each time is worse
@@ -563,7 +572,7 @@ document.addEventListener("DOMContentLoaded", () => {
       stepBeats: riff.stepBeats,
       totalBeats: riff.totalBeats,
       tuning: params.tuning,
-      onPlayEvent: playEvent,
+      onPlayEvents: playEvents,
     }) as HTMLDetailsElement;
     if (riffReadingOpen !== null) reading.open = riffReadingOpen;
     reading.addEventListener("toggle", () => {

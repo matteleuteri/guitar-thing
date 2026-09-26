@@ -99,11 +99,25 @@ B|----------------3---5---5---3---|
 G|--------------------------------|
 ```
 
-A chord line and a tab lane can appear in the same document — they play
-together, so the chords are the accompaniment and the tab is the melody. That
-union is why one beat can print two events in the readout: a chord row and a
-tab row. Chord voicings are chosen automatically (the hand moves as little as
-possible), so the tab lane is the escape hatch when you want exact strings.
+A chord line and a tab lane can appear in the same document, and they **play
+together**: a chord and a tab note on the same beat are one moment, the note
+sounding *on top of* the chord, exactly as you would strum it. That is what a
+chord chart printed above tab means in a songbook. So the two lines are layers,
+not two ways of writing the same music — and the readout says so per moment
+(`C + 5 → E3 G3 C4 with A4 on top`) rather than printing two rows at the same
+time, which read as a duplicate. Chord voicings are chosen automatically (the
+hand moves as little as possible), so the tab lane is the escape hatch when you
+want exact strings.
+
+**The bar ruler above the box is the shared grid.** It is aligned in
+*characters* (`ch` is exact in a monospace font), and each number sits two
+characters along, because a tab column starts after the lane's `e|`. That is
+the piece the text alone never gave you: a chord line is one token per **bar**
+and a tab lane is one character per column, so without the ruler you had to
+count columns to find out that `C` and the tab's first note are the same
+instant. Padding the chord line so its tokens land on the numbers lines the two
+layers up visually — it changes nothing you hear, since whitespace separates the
+chords either way. The shipped example is padded; `C Am F G` is the same music.
 
 `step` sets the grid, and it takes a plain number of beats or a note-value
 name: `quarter`, `eighths`, `sixteenths`, `eighth triplets`, `1/8`, `16ths`,

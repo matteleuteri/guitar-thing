@@ -60,19 +60,58 @@ header p { color: var(--muted); max-width: 70ch; margin-top: .25rem; }
 }
 #riff-only .field-wide { flex: 1 1 34rem; align-items: flex-start; }
 #riff-only .field-wide label { padding-top: .35rem; }
+/* The box and the bar ruler above it must agree on what one CHARACTER is, or
+   the ruler's `ch` offsets drift and the whole thing lies. So both read these
+   three properties rather than repeating literals. */
+#riff-text, .riff-grid {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: .82rem;
+  --riff-box-pad: .6rem;
+}
 #riff-text {
   flex: 1;
   min-width: 18rem;
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: .82rem;
   line-height: 1.45;
-  padding: .5rem .6rem;
+  padding: .5rem var(--riff-box-pad);
   border-radius: 6px;
   border: 1px solid var(--line, #33465c);
   background: #0a1119;
   color: inherit;
   resize: vertical;
   tab-size: 4;
+}
+/* Bar ruler over the notation box: one mark per bar, positioned in characters
+   so it lines up with the tab lane body. `ch` is exact in a monospace font, and
+   the left padding matches the textarea's, so a mark at 2ch is the first
+   character after `e|`. */
+.riff-grid {
+  position: relative;
+  flex: 1 1 100%;
+  min-width: 18rem;
+  height: 1.15rem;
+  margin-bottom: .15rem;
+  padding-left: var(--riff-box-pad);
+  color: var(--accent);
+  font-size: .68rem;
+  line-height: 1;
+  user-select: none;
+}
+.riff-grid-bar {
+  position: absolute;
+  top: 0;
+  /* The lane body starts after `e|`; the tick itself is centred on the column. */
+  transform: translateX(-.5ch);
+  padding-left: .5ch;
+  border-left: 1px solid rgba(76, 194, 255, .35);
+  height: .55rem;
+}
+.riff-grid-num { padding-left: .2ch; }
+.riff-grid-note {
+  position: absolute;
+  right: 0;
+  top: 0;
+  color: var(--muted);
+  letter-spacing: .03em;
 }
 #riff-scale, #riff-loop-start, #riff-loop-end { width: 4.5rem; }
 .riff-transport { display: inline-flex; gap: .35rem; }

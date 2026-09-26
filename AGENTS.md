@@ -177,7 +177,13 @@ degenerate case (one event per bar, fixed width). Don't build a second
 names, a chord sheet, or MIDI import). `parseRiff(text, options)` in
 `src/riff.ts` returns a `Riff`; both notations may appear in one document and
 their events are **unioned on one beat grid** (a chord line and a tab lane at
-the same beat both play — deliberately additive):
+the same beat both play — deliberately additive, and it is what a chord chart
+printed above tab means in a songbook). The user called the union unintuitive,
+and the *concept* was never the problem: the two lines are measured in
+different units (a chord token per **bar**, a tab **character** per column) and
+nothing in the text showed where a bar boundary fell, so `C` and the tab's first
+note being the same instant had to be counted out by hand. Fixed by making the
+alignment visible, not by changing what plays — see the bar ruler below.
 
 ```
 tempo 96        # directives: tempo|bpm, bar, step|grid, strum, release
@@ -185,7 +191,9 @@ bar 4           # beats per bar (default 4)
 step eighths    # how long one column lasts (default: an 8th note)
 strum 55        # default strum width ms for multi-note events (0 = blocked)
 release 1200    # damp each note 1200ms in; 0/absent = let ring (default)
-C Am F G        # a chord line: one chord per bar, spaced or `C|Am|F|G`
+  C       Am      F       G    # a chord line: one chord per bar, padded onto
+                                # the ruler's marks (padding is cosmetic —
+                                # whitespace separates the chords either way)
 e|5---5---7---7---8---8---7---5---|
 B|----------------3---5---5---3---|
 G|--------------------------------|
@@ -207,6 +215,29 @@ Chord voicings reuse `planGuitarSong`'s DP so the hand moves as little as
 possible; tab events are the explicit-string escape hatch. Note names are
 resolved to *frequencies* via `tuning[stringIndex] + fret`; there is no raw
 Hz/MIDI input yet.
+
+**The bar ruler is the shared axis (`renderRiffGrid`), and it is aligned in
+CHARACTERS.** It sits directly above the textarea and marks each bar at
+`LANE_PREFIX + bar * (beatsPerBar / stepBeats)` in `ch` — 2, because a lane body
+starts after its `e|`. `ch` is exact in a monospace font, so this only holds
+while the ruler and the box agree on font-family, font-size and left padding;
+those three live in ONE rule (`#riff-text, .riff-grid`, with
+`--riff-box-pad`) precisely so the alignment cannot be broken by editing one
+selector. **Do not give the ruler its own font/padding literals** — that is the
+whole failure mode. The shipped example is padded so each chord token lands on
+its bar's mark, and `scripts/smoke.mjs` asserts that alignment (token column ==
+`2 + bar * perBar`, lane is a whole number of bars) rather than trusting an
+eyeball: it is invisible when it drifts.
+
+**The readout groups by MOMENT, not by event.** A chord and a tab note on the
+same beat is one thing you hear, and printing it as two rows at the same
+beat/time read as a duplicated entry — which is most of why the union felt
+arbitrary. `renderRiffReading` now collapses equal-beat events into one row
+spelled `C + 5 → E3 G3 C4 with A4 on top`, tagged `chord + tab`. Only a chord
+and a tab event can share a beat (chords land on `index * beatsPerBar`, tab
+events on `column * stepBeats`, one event per column), so a run of equal beats
+is always at most a chord plus a lane — but the grouping is written generally
+rather than assuming a pair.
 
 **The grid is named, not counted (`stepValue`/`stepName`).** `step 0.5` is a
 count of *beats*, which is not how anyone says rhythm out loud, so `step`

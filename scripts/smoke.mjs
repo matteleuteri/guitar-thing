@@ -591,6 +591,38 @@ throws(() => parseRiff("# only a comment", riffOpts), "empty riff throws");
         riff.events.some((e) => e.kind === "chord") && riff.events.some((e) => e.kind === "note"),
         "the shipped default exercises both the chord stream and the tab lane",
       );
+      // The shipped chord line is padded so each token lands on its bar's
+      // character in the bar ruler. That padding is the whole "these two layers
+      // share one grid" demonstration, and it is invisible until it drifts —
+      // so assert the alignment instead of trusting the eyeball.
+      const chordLine = text.split("\n").find((l) => /\bC\b\s+Am\b/.test(l));
+      const laneLine = text.split("\n").find((l) => /^[eBGDAE]\|/.test(l));
+      if (chordLine && laneLine) {
+        const LANE_PREFIX = 2; // a lane body starts after its `e|`
+        const perBar = Math.round(riff.beatsPerBar / riff.stepBeats);
+        const tokens = chordLine.trim().split(/\s+/);
+        check(
+          tokens.length === Math.round(riff.totalBeats / riff.beatsPerBar),
+          `the shipped chord line has one token per bar (${tokens.length} tokens, ${riff.totalBeats / riff.beatsPerBar} bars)`,
+        );
+        tokens.forEach((token, bar) => {
+          const column = LANE_PREFIX + bar * perBar;
+          check(
+            chordLine.indexOf(token) === column,
+            `chord "${token}" (bar ${bar + 1}) sits at character ${column}, on the ruler mark (got ${chordLine.indexOf(token)})`,
+          );
+        });
+        // And the ruler has to agree with the lane it is measuring: bar N+1
+        // starts `perBar` characters into the lane body.
+        // Drop the lane letter and BOTH pipes to get its column count.
+        const laneBody = laneLine.slice(LANE_PREFIX, -1);
+        check(
+          laneBody.length === Math.round(riff.totalBeats / riff.beatsPerBar) * perBar,
+          `the shipped lane is a whole number of bars (${laneBody.length} columns, ${laneBody.length / perBar} bars)`,
+        );
+      } else {
+        check(false, "the shipped default has both a chord line and a tab lane");
+      }
     } catch (err) {
       check(false, `the shipped default parses (${err.message})`);
     }
