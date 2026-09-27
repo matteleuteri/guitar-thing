@@ -15,6 +15,8 @@ import { DEFAULT_CONFIG } from "./synth/config.js";
 import { el, renderChordDiagram, renderRiffGrid, renderRiffReading, renderRiffTimeline, setRiffPlayhead } from "./render.js";
 import { parseRiff, secondsPerBeat, stepName, type Riff, type RiffEvent } from "./riff.js";
 import { RiffTransport } from "./transport.js";
+import { TabEditor } from "./tab-editor.js";
+import { buildOverlay } from "./tab-overlay.js";
 
 /**
  * Riff builder: the riff trainer as its own page, off the note/chord finder.
@@ -65,6 +67,7 @@ const loopStartInput = document.getElementById("riff-loop-start") as HTMLInputEl
 const loopEndInput = document.getElementById("riff-loop-end") as HTMLInputElement;
 const metronomeInput = document.getElementById("riff-metronome") as HTMLInputElement;
 const countInInput = document.getElementById("riff-countin") as HTMLInputElement;
+const progressionInput = document.getElementById("riff-progression") as HTMLInputElement;
 const playButton = document.getElementById("riff-play") as HTMLButtonElement;
 const stopButton = document.getElementById("riff-stop") as HTMLButtonElement;
 
@@ -77,6 +80,83 @@ for (const tuning of TUNINGS) {
 tuningSelect.addEventListener("change", () => {
   customTuning.hidden = tuningSelect.value !== "custom";
 });
+
+// --------------------------------------------------------- tab editor ----
+
+/** Tuning index → lane label. Index 5 = high e, index 0 = low E. */
+const LABEL_FOR_STRING = ["E", "A", "D", "G", "B", "e"];
+let tabEditor: TabEditor | null = null;
+
+const tabEditorContainer = document.getElementById("tab-editor") as HTMLDivElement;
+tabEditor = new TabEditor(tabEditorContainer, {
+  beatsPerBar: 4,
+  stepBeats: 0.5,
+  onChange: (lanes) => updateTabLanes(lanes),
+});
+
+/**
+ * Generate the tab lane text for one string from the grid. Each cell is one
+ * character column; a dash is a rest, a fret number is a note (and a two-digit
+ * fret occupies two columns, per the parser's rules).
+ */
+function tabLaneText(cells: (number | null)[]): string {
+  let text = "";
+  for (let i = 0; i < cells.length; i++) {
+    const fret = cells[i];
+    if (fret === null) {
+      text += "-";
+    } else {
+      text += String(fret);
+      if (fret >= 10) i++; // two-digit fret eats the next column
+    }
+  }
+  return text;
+}
+
+/**
+ * Replace the tab lanes in the notation with the grid's current content.
+ * Directives, the chord line, and comments are preserved. The tab lane lines
+ * are the ones matching `LANE_LINE` (string letter + pipe + body + pipe).
+ */
+function updateTabLanes(lanes: Map<number, (number | "x" | null)[]>): void {
+  const riff = plan;
+  if (!riff) return;
+
+  const laneLines: string[] = [];
+  for (let s = 5; s >= 0; s--) {
+    const cells = lanes.get(s);
+    if (!cells || !cells.some((c) => c !== null)) continue;
+    const body = tabLaneText(
+      cells.map((c) => (typeof c === "number" ? c : null)),
+    );
+    laneLines.push(`${LABEL_FOR_STRING[s]}|${body}|`);
+  }
+
+  const lines = text.value.split("\n");
+  const newLines: string[] = [];
+  for (const line of lines) {
+    if (/^\s*[eBGDAE]\s*\|/.test(line)) continue; // drop old tab lanes
+    newLines.push(line);
+  }
+  // Insert tab lanes after the last non-empty, non-directive line.
+  let insertAt = 0;
+  for (let i = 0; i < newLines.length; i++) {
+    const t = newLines[i].trim();
+    if (t && !t.startsWith("#") && !/^(tempo|bpm|bar|step|grid|strum|release)\s+/i.test(t)) {
+      insertAt = i + 1;
+    }
+  }
+  newLines.splice(insertAt, 0, ...laneLines);
+  text.value = newLines.join("\n");
+  stop();
+  refresh();
+}
+
+/** Parse the notation into the grid via the shared overlay builder. */
+function syncTabEditor(): void {
+  if (!tabEditor || !plan) return;
+  tabEditor.setLanes(buildOverlay(plan));
+}
 
 // The kit label is set after `preloadGuitarEngine` above, which may already have
 // restored a stored choice, so it must be read rather than assumed.
@@ -148,6 +228,66 @@ function playEvent(event: RiffEvent, when: number) {
     strumMs: event.strumMs,
     releaseMs: plan?.releaseMs ?? 0,
   });
+}
+
+// ---------------------------------------------------------- progression ----
+
+/**
+ * Build the chord line for the notation, with each chord token landing on its
+ * bar's mark on the ruler. The mark for bar `i` is at character
+ * `LANE_PREFIX + i * perBar`, where `perBar` is the number of tab columns per
+ * bar. The padding is what makes `C` and the tab's first note line up on the
+ * same beat — without it the chord stream and the tab lanes drift apart.
+ */
+function formatChordLine(chords: string[], beatsPerBar: number, stepBeats: number): string {
+  const perBar = beatsPerBar / stepBeats;
+  let line = "";
+  for (let i = 0; i < chords.length; i++) {
+    // LANE_PREFIX is 2 (the `e|` before the first tab column).
+    const pos = 2 + i * perBar;
+    while (line.length < pos) line += " ";
+    line += chords[i];
+  }
+  return line;
+}
+
+/**
+ * Replace the chord line in the notation with the progression from the input.
+ * Tab lanes, directives, and comments are preserved. The chord line is the
+ * first non-directive, non-tab-lane, non-comment line in the notation.
+ */
+function applyProgression(): void {
+  const chords = progressionInput.value.split(/\s+/).filter(Boolean);
+  if (chords.length === 0) return;
+
+  const riff: Riff | null = plan;
+  if (!riff) return;
+
+  const chordLine = formatChordLine(chords, riff.beatsPerBar, riff.stepBeats);
+
+  const lines = text.value.split("\n");
+  const newLines: string[] = [];
+  let replaced = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (
+      !replaced &&
+      trimmed &&
+      !trimmed.startsWith("#") &&
+      !trimmed.startsWith("//") &&
+      !/^\s*[eBGDAE]\s*\|/.test(line) &&
+      !/^(tempo|bpm|bar|step|grid|strum|release)\s+/i.test(trimmed)
+    ) {
+      newLines.push(chordLine);
+      replaced = true;
+    } else {
+      newLines.push(line);
+    }
+  }
+
+  text.value = newLines.join("\n");
+  stop();
+  refresh();
 }
 
 /**
@@ -399,6 +539,7 @@ function refresh(): Riff | null {
   }
   setError(null);
   plan = riff;
+  syncTabEditor();
 
   const bars = riff.totalBeats / riff.beatsPerBar;
   const noteCount = riff.events.reduce((sum, event) => sum + event.notes.length, 0);
@@ -466,6 +607,14 @@ text.addEventListener("input", () => {
   // text that updates per character fights the typing.
   window.clearTimeout(editTimer);
   editTimer = window.setTimeout(() => refresh(), RIFF_EDIT_MS);
+});
+
+// The progression input is a convenience over editing the chord line directly:
+// it formats chords into the notation with the bar-ruler alignment done for you.
+progressionInput.addEventListener("input", () => {
+  stop();
+  window.clearTimeout(editTimer);
+  editTimer = window.setTimeout(applyProgression, RIFF_EDIT_MS);
 });
 
 // These re-plan: they change what the chord stream is voiced into.

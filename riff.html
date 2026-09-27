@@ -19,6 +19,10 @@
     <main>
       <section id="notation">
         <h2>Notation</h2>
+        <div class="field">
+          <label for="riff-progression">Chord progression</label>
+          <input id="riff-progression" type="text" value="C Am F G" spellcheck="false" title="One chord per bar, separated by spaces. Auto-aligns each chord to its bar mark on the ruler." />
+        </div>
         <div class="field field-wide">
           <div class="riff-box">
             <div class="riff-grid" id="riff-grid" aria-hidden="true"></div>
@@ -37,7 +41,9 @@ G|--------------------------------|</textarea
           </div>
         </div>
         <p id="riff-error" class="error" hidden></p>
+        <div id="tab-editor" class="tab-editor"></div>
         <details class="riff-legend">
+          <summary>How to write this — syntax, the bar ruler, and what plays</summary>
           <summary>How to write this — syntax, the bar ruler, and what plays</summary>
           <div class="riff-legend-body">
             <ul>

@@ -1,7 +1,7 @@
 import { playFrettedNote, playNotes, playVoicing } from "./audio.js";
 import { findPositions, type Fingering } from "./fretboard.js";
 import { chordShape } from "./fretboard.js";
-import type { RiffEvent } from "./riff.js";
+import type { RiffEvent, RiffNote } from "./riff.js";
 import { midiName, SEMITONES } from "./theory.js";
 import { barMarkFraction, noteLeftPercent, stepColumns, trackFraction } from "./timeline.js";
 
@@ -391,10 +391,10 @@ export function renderRiffTimeline(
     canvas.appendChild(row);
   }
 
-  // Notes, placed on their string's row at their step.
+  // Notes, placed on their string's row at their step. Each chip goes on its
+  // own string's row — a chord's notes spread across strings, not stacked on one.
   const tracks = box.querySelectorAll<HTMLElement>(".riff-track");
   events.forEach((event, index) => {
-    const group = el("div", event.notes.length > 1 ? "riff-note riff-chord" : "riff-note");
     // The event's EXACT beat as a fraction of the loop -- the same unit the
     // playhead, the bar marks and the loop region use. It used to be a rounded
     // column index (`round(beat / stepBeats) / stepCount`), which silently
@@ -402,33 +402,27 @@ export function renderRiffTimeline(
     // own bar mark sit. A tab event is always on-grid (its beat IS a column),
     // but a chord lands on a bar line, and a bar line is only on-grid when
     // beatsPerBar / step is a whole number -- e.g. `bar 5` with `step 0.75`.
-    group.style.left = `${noteLeftPercent(event.beat, totalBeats)}%`;
-    group.title = `${event.label} — bar ${Math.floor(event.beat / beatsPerBar) + 1}, beat ${(event.beat % beatsPerBar) + 1}`;
-    group.dataset.index = String(index);
+    const title = `${event.label} — bar ${Math.floor(event.beat / beatsPerBar) + 1}, beat ${(event.beat % beatsPerBar) + 1}`;
     for (const note of event.notes) {
-      const chip = el("span", "riff-fret", String(note.fret));
-      chip.style.background = colorFor((tuning[note.stringIndex] + note.fret) % 12);
-      group.appendChild(chip);
-    }
-    if (options.onPlayEvent) {
-      group.classList.add("riff-clickable");
-      group.addEventListener("click", (e) => {
-        e.stopPropagation();
-        options.onPlayEvent!(index);
-      });
-    }
-    // A multi-string event is one group; anchor it to its topmost (highest
-    // sounding) string so a strummed chord hangs together.
-    if (tracks.length) {
-      const anchorRow = tracks.length - 1 - Math.max(...event.notes.map((n) => n.stringIndex));
-      // Deliberately NOT `tracks[anchorRow]?.appendChild(...)`. That optional
-      // chain is what silently swallowed every note when this ran against a
-      // detached canvas: an out-of-range index dropped the group with nothing
-      // thrown, and the timeline showed bars and rows and no notes at all. A
-      // row index outside the grid means the note's string is not in this
-      // tuning, so fall back to the top row -- the group stays VISIBLE, which
-      // is what makes that mistake obvious instead of invisible.
-      const row = tracks[anchorRow] ?? tracks[0];
+      const group = el("div", event.notes.length > 1 ? "riff-note riff-chord" : "riff-note");
+      const fretChip = el("span", "riff-fret", String(note.fret));
+      fretChip.style.background = colorFor((tuning[note.stringIndex] + note.fret) % 12);
+      group.appendChild(fretChip);
+      group.style.left = `${noteLeftPercent(event.beat, totalBeats)}%`;
+      group.title = title;
+      group.dataset.index = String(index);
+      if (options.onPlayEvent) {
+        group.classList.add("riff-clickable");
+        group.addEventListener("click", (e) => {
+          e.stopPropagation();
+          options.onPlayEvent!(index);
+        });
+      }
+      // Place the group on its own string's row. Deliberately NOT
+      // `tracks[row]?.appendChild(...)`: that optional chain silently swallowed
+      // every note when this ran against a detached canvas. An out-of-range
+      // row falls back to the top row so the group stays visible.
+      const row = tracks[tracks.length - 1 - note.stringIndex] ?? tracks[0];
       row.appendChild(group);
     }
   });
@@ -466,8 +460,6 @@ export function renderRiffReading(
   },
 ): HTMLElement {
   const { tuning, beatsPerBar, onPlayEvents } = options;
-  const sounded = (event: RiffEvent) =>
-    event.notes.map((note) => midiName(tuning[note.stringIndex] + note.fret)).join(" ");
   // One moment per row. Events are already beat-sorted, and only a chord and a
   // tab event can share a beat, so a run of equal beats is the whole chord.
   const moments: { beat: number; indices: number[] }[] = [];
@@ -512,13 +504,35 @@ export function renderRiffReading(
     // What the page said (`C` + `e5`, or just `5`) — kept verbatim so a row can
     // be matched back to a column of the notation by eye.
     row.appendChild(el("span", "riff-reading-label", here.map((event) => event.label).join(" + ")));
-    // The shape only exists for a voicing the app chose; a tab event's tab is
-    // already the label, verbatim from the lane. It gets its own column so the
-    // shapes line up when you scan a progression instead of running together.
-    row.appendChild(el("span", "riff-reading-shape", chord ? chordShape(chord.frets) : ""));
-    const onTop = over.map(sounded).join(" + ");
-    const bed = chord ? sounded(chord) : "";
-    row.appendChild(el("span", "riff-reading-notes", chord && onTop ? `${bed} with ${onTop} on top` : chord ? bed : onTop));
+    // Combined shape: tab notes override the chord on any string they specify.
+    // The chord is auto-voiced by the DP (which doesn't know about the tab), so
+    // without this the shape and the tab notes could contradict each other.
+    const combinedFrets: (number | null)[] = new Array(6).fill(null);
+    if (chord) {
+      for (let s = 0; s < 6; s++) combinedFrets[s] = chord.frets[s];
+    }
+    for (const event of over) {
+      for (let s = 0; s < 6; s++) {
+        if (event.frets[s] !== null) combinedFrets[s] = event.frets[s];
+      }
+    }
+    // Combined notes: chord notes minus any on strings the tab overrides, plus tab notes.
+    const combinedNotes: RiffNote[] = [];
+    if (chord) {
+      for (const note of chord.notes) {
+        if (!over.some((e) => e.frets[note.stringIndex] !== null)) {
+          combinedNotes.push(note);
+        }
+      }
+    }
+    for (const event of over) {
+      combinedNotes.push(...event.notes);
+    }
+    const combinedSounded = combinedNotes
+      .map((note) => midiName(tuning[note.stringIndex] + note.fret))
+      .join(" ");
+    row.appendChild(el("span", "riff-reading-shape", chord || over.length ? chordShape(combinedFrets) : ""));
+    row.appendChild(el("span", "riff-reading-notes", combinedSounded));
     // Where the shape came from, which is the only part the app invented.
     const source = chord
       ? over.length

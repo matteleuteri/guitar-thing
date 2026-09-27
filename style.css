@@ -697,3 +697,85 @@ h2 .muted { font-size: .85rem; font-weight: 400; color: var(--muted); }
   .riff-reading-shape { display: none; }
   .riff-reading-voiced { display: none; }
 }
+
+/* ---------------------------------------------------------- tab editor ---- */
+
+.tab-editor {
+  margin: 0.5rem 0;
+  overflow-x: auto;
+}
+
+.tab-grid {
+  display: inline-block;
+  min-width: 100%;
+}
+
+.tab-row {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.tab-label {
+  width: 1.4rem;
+  flex-shrink: 0;
+  text-align: right;
+  padding-right: 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted, #8b95a5);
+  user-select: none;
+}
+
+.tab-head .tab-label {
+  height: 1.2rem;
+}
+
+.tab-colnum {
+  width: 1.6rem;
+  flex-shrink: 0;
+  text-align: center;
+  font-size: 0.65rem;
+  color: var(--muted, #8b95a5);
+  user-select: none;
+  padding: 0.1rem 0;
+}
+
+.tab-colnum-bar {
+  color: var(--accent, #6ea8fe);
+  font-weight: 700;
+}
+
+.tab-cell {
+  width: 1.6rem;
+  height: 1.6rem;
+  flex-shrink: 0;
+  border: 1px solid var(--line, #33404f);
+  border-radius: 2px;
+  background: var(--panel, #1d222a);
+  color: var(--fg, #e1e8f0);
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.tab-cell:hover {
+  border-color: var(--accent, #6ea8fe);
+  background: var(--panel-2, #242b35);
+}
+
+.tab-cell-on {
+  background: var(--accent, #6ea8fe);
+  color: #14171c;
+  border-color: var(--accent, #6ea8fe);
+}
+
+.tab-cell-on:hover {
+  background: #8bc0ff;
+  border-color: #8bc0ff;
+}
