@@ -243,8 +243,11 @@ export function renderChordDiagram(
   });
   box.appendChild(play);
 
-  // Head row: mute / open markers per string.
+  // Head row: mute / open markers per string. The first cell is a spacer that
+  // matches the body rows' fret-number column, so the markers align with the
+  // string cells below.
   const head = el("div", "cd-head");
+  head.appendChild(el("span", "cd-head-spacer"));
   for (let stringIndex = 0; stringIndex < frets.length; stringIndex++) {
     const fret = frets[stringIndex];
     const marker = el("span", held[stringIndex] ? "cd-held" : "", fret === null ? "×" : fret === 0 ? "○" : "");

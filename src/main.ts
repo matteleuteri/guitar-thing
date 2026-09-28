@@ -1,6 +1,47 @@
 import { stopAudio, playNotes, playVoicing, preloadGuitarEngine, getSmplrStatus, getAudioDebugEvents, getGuitarKit, setGuitarKit, type GuitarKitName } from "./audio.js";
 import { DEFAULT_CONFIG } from "./synth/config.js";
 import { findFingerings, type Fingering } from "./fretboard.js";
+
+/** How many fingerings/voicings to show before "show all". */
+const INITIAL_SHOW = 6;
+
+/**
+ * Score a fingering for playability — lower is better. A human has four fingers,
+ * open strings are free, and a high barre is harder than a low one.
+ */
+function playabilityScore(frets: (number | null)[]): number {
+  let score = 0;
+  const fretted = frets.filter((f): f is number => f !== null);
+  const muted = frets.filter((f) => f === null).length;
+
+  // Muted strings: each one is a cost (you have to avoid ringing it).
+  score += muted * 2;
+
+  // More than 4 fretted strings means a barre or stretch — penalize.
+  if (fretted.length > 4) score += (fretted.length - 4) * 3;
+
+  // Open strings are free and ring clearly — bonus.
+  const openCount = fretted.filter((f) => f === 0).length;
+  score -= openCount * 1.5;
+
+  // Barre detection: same fret on 3+ strings.
+  const fretCounts = new Map<number, number>();
+  for (const f of fretted) fretCounts.set(f, (fretCounts.get(f) ?? 0) + 1);
+  for (const count of fretCounts.values()) {
+    if (count >= 3) score += 2; // barre shape
+  }
+
+  // Position: lower on the neck is generally easier.
+  const minFret = Math.min(...fretted.filter((f) => f > 0), 0);
+  score += minFret * 0.3;
+
+  return score;
+}
+
+/** Sort fingerings by playability (best first). */
+function rankFingerings(fingerings: Fingering[]): Fingering[] {
+  return [...fingerings].sort((a, b) => playabilityScore(a.frets) - playabilityScore(b.frets));
+}
 import { findPianoVoicings, type PianoVoicing } from "./piano.js";
 import { colorFor, el, renderChordDiagram, renderPiano, renderPianoVoicing, renderPositions } from "./render.js";
 import {
@@ -54,6 +95,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const pianoOnly = document.getElementById("piano-only") as HTMLDivElement;
   const tuningSelect = document.getElementById("tuning") as HTMLSelectElement;
   const fretsInput = document.getElementById("frets") as HTMLInputElement;
+  const stringsUsedMinInput = document.getElementById("strings-used-min") as HTMLInputElement;
+  const stringsUsedMaxInput = document.getElementById("strings-used-max") as HTMLInputElement;
   const strumInput = document.getElementById("strum") as HTMLInputElement;
   const kitButton = document.getElementById("kit") as HTMLButtonElement;
   const pianoLowInput = document.getElementById("piano-low") as HTMLInputElement;
@@ -218,15 +261,43 @@ document.addEventListener("DOMContentLoaded", () => {
       return card;
     }
 
-    card.appendChild(
-      el("div", "chord-count", `${fingerings.length} fingering${fingerings.length === 1 ? "" : "s"}${truncated ? " (truncated)" : ""}`),
-    );
+    const ranked = rankFingerings(fingerings);
+    const showAll = ranked.length <= INITIAL_SHOW;
+    const shown = showAll ? ranked : ranked.slice(0, INITIAL_SHOW);
+    const countText = `${fingerings.length} fingering${fingerings.length === 1 ? "" : "s"}${truncated ? " (truncated)" : ""}`;
+    card.appendChild(el("div", "chord-count", countText));
 
     const grid = el("div", "diagrams");
-    for (let i = 0; i < fingerings.length; i++) {
-      grid.appendChild(renderChordDiagram(fingerings[i], tuning, noteName, i + 1));
+    for (let i = 0; i < shown.length; i++) {
+      grid.appendChild(renderChordDiagram(shown[i], tuning, noteName, i + 1));
     }
     card.appendChild(grid);
+
+    if (!showAll) {
+      const toggle = el("button", "show-all", "show all") as HTMLButtonElement;
+      toggle.type = "button";
+      toggle.addEventListener("click", () => {
+        const isOpen = toggle.dataset.open === "1";
+        if (isOpen) {
+          // Collapse back to the top INITIAL_SHOW.
+          grid.replaceChildren();
+          for (let i = 0; i < INITIAL_SHOW; i++) {
+            grid.appendChild(renderChordDiagram(ranked[i], tuning, noteName, i + 1));
+          }
+          toggle.textContent = "show all";
+          toggle.dataset.open = "0";
+        } else {
+          grid.replaceChildren();
+          for (let i = 0; i < ranked.length; i++) {
+            grid.appendChild(renderChordDiagram(ranked[i], tuning, noteName, i + 1));
+          }
+          toggle.textContent = `show less (${INITIAL_SHOW})`;
+          toggle.dataset.open = "1";
+        }
+      });
+      card.appendChild(toggle);
+    }
+
     return card;
   }
 
@@ -281,6 +352,8 @@ document.addEventListener("DOMContentLoaded", () => {
     cap: number;
     tuning: number[];
     fretCount: number;
+    stringsUsedMin: number;
+    stringsUsedMax: number;
     pianoLow: number;
     pianoHigh: number;
   }
@@ -293,14 +366,18 @@ document.addEventListener("DOMContentLoaded", () => {
       const pianoLow = Math.min(108, Math.max(21, parseInt(pianoLowInput.value, 10) || 48));
       const pianoHigh = Math.min(108, Math.max(21, parseInt(pianoHighInput.value, 10) || 84));
       if (pianoLow >= pianoHigh) throw new Error("Lowest key must be below the highest key.");
-      return { pitchClasses, span, cap, tuning: TUNINGS[0].midi, fretCount: 15, pianoLow, pianoHigh };
+      return { pitchClasses, span, cap, tuning: TUNINGS[0].midi, fretCount: 15, stringsUsedMin: 4, stringsUsedMax: 6, pianoLow, pianoHigh };
     }
+    const stringsUsedMin = Math.min(6, Math.max(2, parseInt(stringsUsedMinInput.value, 10) || 4));
+    const stringsUsedMax = Math.min(6, Math.max(stringsUsedMin, parseInt(stringsUsedMaxInput.value, 10) || 6));
     return {
       pitchClasses,
       span,
       cap,
       tuning: getTuning(),
       fretCount: Math.min(24, Math.max(7, parseInt(fretsInput.value, 10) || 15)),
+      stringsUsedMin,
+      stringsUsedMax,
       pianoLow: 48,
       pianoHigh: 84,
     };
@@ -442,9 +519,14 @@ document.addEventListener("DOMContentLoaded", () => {
     posBoard.replaceChildren(renderPositions(params.tuning, params.pitchClasses, params.fretCount, nameOf));
 
     // Chord list: every provided note must be in the chord voicing.
-    const { fingerings, truncated } = findFingerings(params.pitchClasses, params.tuning, params.fretCount, params.span, params.cap);
-    chordList.appendChild(renderChordCard(params.pitchClasses, fingerings, truncated, params.tuning));
-    chordSummary.textContent = `· ${fingerings.length} fingering${fingerings.length === 1 ? "" : "s"} for ${chordName(params.pitchClasses).primary}`;
+    const { fingerings: allFingerings, truncated } = findFingerings(params.pitchClasses, params.tuning, params.fretCount, params.span, params.cap);
+    const filtered = allFingerings.filter((f) => {
+      const used = f.frets.filter((fr) => fr !== null).length;
+      return used >= params.stringsUsedMin && used <= params.stringsUsedMax;
+    });
+    const isFiltered = params.stringsUsedMin > 2 || params.stringsUsedMax < 6;
+    chordList.appendChild(renderChordCard(params.pitchClasses, filtered, truncated && !isFiltered, params.tuning));
+    chordSummary.textContent = `· ${filtered.length} fingering${filtered.length === 1 ? "" : "s"} for ${chordName(params.pitchClasses).primary}${isFiltered ? ` · ${params.stringsUsedMin}-${params.stringsUsedMax} strings` : ""}`;
   }
 
   form.addEventListener("submit", (e) => {
@@ -452,6 +534,10 @@ document.addEventListener("DOMContentLoaded", () => {
     saveSpan(instrumentSelect.value);
     run();
   });
+
+  // Live-update the chord list when "strings used" range changes.
+  stringsUsedMinInput.addEventListener("input", () => run());
+  stringsUsedMaxInput.addEventListener("input", () => run());
 
   run();
 });

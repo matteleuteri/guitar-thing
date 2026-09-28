@@ -158,6 +158,29 @@ function syncTabEditor(): void {
   tabEditor.setLanes(buildOverlay(plan));
 }
 
+/**
+ * Reflect the notation's chord line back into the progression input, so the
+ * input is a live view of the chord stream (not just a one-way write). Called
+ * after every refresh; setting `.value` does not fire the input event, so
+ * there is no loop with applyProgression.
+ */
+function syncProgressionInput(): void {
+  const lines = text.value.split("\n");
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith("//")) continue;
+    if (/^\s*[eBGDAE]\s*\|/.test(line)) continue;
+    if (/^(tempo|bpm|bar|step|grid|strum|release)\s+/i.test(trimmed)) continue;
+    // This is the chord line: extract just the chord tokens.
+    const tokens = trimmed.split(/[\s,;|]+/).filter(
+      (t) => t && !t.startsWith("#") && !t.startsWith("//"),
+    );
+    if (tokens.length > 0) progressionInput.value = tokens.join(" ");
+    return;
+  }
+  progressionInput.value = "";
+}
+
 // The kit label is set after `preloadGuitarEngine` above, which may already have
 // restored a stored choice, so it must be read rather than assumed.
 let guitarKit = getGuitarKit();
@@ -540,6 +563,7 @@ function refresh(): Riff | null {
   setError(null);
   plan = riff;
   syncTabEditor();
+  syncProgressionInput();
 
   const bars = riff.totalBeats / riff.beatsPerBar;
   const noteCount = riff.events.reduce((sum, event) => sum + event.notes.length, 0);

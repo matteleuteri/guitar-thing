@@ -471,13 +471,17 @@ h2 .muted { font-size: .85rem; font-weight: 400; color: var(--muted); }
 .cd-id::before { content: "ID "; opacity: .6; }
 .cd-head {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: 1.7rem repeat(6, 1fr);
+  gap: 3px;
   text-align: center;
   margin-bottom: .3rem;
   font-size: .95rem;
   min-height: 1.4rem;
   color: var(--muted);
   font-family: ui-monospace, monospace;
+}
+.cd-head-spacer {
+  /* Empty spacer matching the body rows' fret-number column. */
 }
 .cd-body {
   display: flex;
@@ -778,4 +782,23 @@ h2 .muted { font-size: .85rem; font-weight: 400; color: var(--muted); }
 .tab-cell-on:hover {
   background: #8bc0ff;
   border-color: #8bc0ff;
+}
+
+/* --------------------------------------------------- chord card toggle ---- */
+
+.show-all {
+  margin-top: 0.5rem;
+  padding: 0.3rem 0.8rem;
+  border: 1px solid var(--line, #33404f);
+  border-radius: 4px;
+  background: var(--panel-2, #242b35);
+  color: var(--fg, #e1e8f0);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: border-color 0.1s, background 0.1s;
+}
+
+.show-all:hover {
+  border-color: var(--accent, #6ea8fe);
+  background: var(--panel, #1d222a);
 }
