@@ -50,8 +50,35 @@ transport and geometry have Node unit tests in `tests/`, wired into `npm test`.
 The loop-to-bar input defaults to 4 so the shipped 4-bar example loops in full.
 The user verified the live page looks right (it was a browser cache issue).
 **Not yet done:** any real-browser
-listen-through, notation for rhythm/duration, raw Hz/MIDI input, per-event
-strum overrides, a metronome/count-in, or finger-number/learning aids.
+listen-through, notation for rhythm/duration, raw Hz/MIDI input, or
+finger-number/learning aids.
+
+**Landed since the last breakpoint (Sep 27 2026):**
+- **Metronome + count-in** for riff mode: `TransportOptions` (`metronome`,
+  `countInBars`) on the transport, `playClick(when, isDownbeat)` in `audio.ts`
+  (gain 0.08), Metronome checkbox + Count-in (bars) inputs on the riff page.
+- **Visual tab editor** (`src/tab-editor.ts`): a clickable grid (one row per
+  string, one column per step) replaces the character-column tab lanes in the
+  notation box. Click cycles frets 1-12, right-click clears. The grid is the
+  source of truth for tab content and regenerates lane text on every change.
+- **Tab overlay** (`src/tab-overlay.ts`): the chord/tab overlay logic extracted
+  from `riff-main.ts` so it is testable without a browser. Chord notes land on
+  their own string rows at the bar line; tab notes override them on the same
+  string. 8 tests in `tests/tab-overlay.test.mjs`.
+- **Timeline note placement fixed**: each note chip now goes on its own
+  string's row in `renderRiffTimeline`, so chord notes spread across strings
+  instead of stacking vertically on one row.
+- **Combined shape + notes** in "What you'll hear": tab notes override the
+  auto-voiced chord on any string they specify, so the readout no longer
+  contradicts itself.
+- **Chord finder refinements**: playability ranking (muted strings, barre
+  detection, open-string bonus, position), top-6 default with a "show all"
+  toggle, and a min/max strings-used filter (default 4-6) with live updates.
+- **Chord diagram head alignment**: the x/o markers now align with the string
+  cells below (added a spacer matching the fret-number column).
+- **Progression input two-way sync**: the chord progression input reflects
+  whatever chord line is in the notation, so it is a live view of the chord
+  stream (not just a one-way write).
 
 **Audio baseline (unchanged, on `main`):** all approved audio work is merged
 into `main` (and pushed to `origin/main`): the physical string core (commuted
@@ -490,6 +517,11 @@ that fills, and assert the note COUNT: a probe that skips missing notes reports
   + tab lane" parser. See "Riff trainer" above.
 - `src/transport.ts` — `RiffTransport`, the lookahead scheduler behind the riff
   builder's playback (injected clock/ticker so the smoke test can drive it).
+  Carries `TransportOptions` (`metronome`, `countInBars`) and a `onClick` callback.
+- `src/tab-editor.ts` — the visual tab editor grid (one row per string, one column
+  per step). Clickable cells that generate lane text for the notation.
+- `src/tab-overlay.ts` — `buildOverlay(riff)`: pure chord/tab overlay logic,
+  extracted from `riff-main.ts` so it is testable without a browser.
 - `src/main.ts` — UI wiring, form handling, guitar/piano orchestration (the
   finder's entry point; no riff code).
 - `src/riff-main.ts` — the riff builder's wiring: notation editor, voicing
