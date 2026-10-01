@@ -80,6 +80,61 @@ finger-number/learning aids.
   whatever chord line is in the notation, so it is a live view of the chord
   stream (not just a one-way write).
 
+**In flight (uncommitted, Oct 1 2026) — the unified track view.** The riff
+page's top section is being rebuilt as ONE track (`src/track.ts`,
+`renderTrack`): bar ruler, loop region, event blocks (chord = blue, name +
+auto-voiced shape; tab = gray, fret numbers), per-string fret chips, and a
+single playhead, ALL absolutely positioned against one `.track-canvas` in one
+unit (fractions of the track, from `src/timeline.ts`). It replaces
+`renderRiffTimeline`, which `riff-main.ts` no longer calls. **Why:** the
+previous iteration had the event blocks and the per-string grid in SEPARATE
+positioning contexts (the grid had a string-label gutter, the blocks strip
+did not), so a block at beat N and its chips at beat N drifted apart — the
+misalignment the user reported on an otherwise good-sounding playback. One
+canvas makes "same beat = same pixel" true by construction instead of by
+agreement between two layouts. Status: `npm test` green; **NOT yet verified
+in a browser** — the geometry is provably consistent horizontally, but
+layout is pixels (see "layout still needs a browser" below). Known issues
+found by static read of the working tree (the first is fixed; the rest are
+still unconfirmed by eye):
+
+- ~~`.track-block` edge clipping~~ **FIXED (Oct 1)** — confirmed by the
+  user's eye. Blocks are centered on their beat with
+  `translate(-50%, -50%)`, so the beat-0 block hung half off the canvas's
+  left edge and the scroll container clipped it (left overflow is not
+  scrollable). Fix: `.track` carries `padding: 0 var(--track-endpad)`
+  (4rem) — container padding IS scrollable space, so edge blocks render
+  whole and the track reads as starting a little before beat 0. Do NOT move
+  the pad onto the canvas: canvas padding joins its padding box, the beat
+  fractions would stretch across the pad, and beat 0 would still sit at the
+  clipped edge. The loop highlight got the matching treatment: when a loop
+  edge IS the track edge, `renderTrack` adds `track-loop-at-start`/`-at-end`
+  and a pseudo-element bleeds the tint into the end padding (width
+  `--track-endpad`), so an overhanging edge block sits on the blue — while
+  the region's own borders keep marking the exact loop bounds and an
+  interior loop gets no bleed.
+- Chip rows are `top: 5 + row * 1.5rem` against a 12rem-high canvas: the
+  low-E row sits at 12.5rem, BELOW the canvas (and below the loop highlight,
+  which ends at `bottom: .3rem` of the canvas). `overflow-x: auto` also makes
+  `overflow-y` compute to `auto`, so `.track` grows a vertical scrollbar.
+- The track has NO string lanes, lane letters or step gridlines — the old
+  timeline had all three (`--track-gutter: 1.4rem` is declared but never
+  used). Chips float on bare canvas, so a chip's string is only knowable
+  from its tooltip.
+- Dead code left behind: `renderRiffTimeline` + `setRiffPlayhead` in
+  `render.ts` have no live caller (`timelineEl` in `riff-main.ts` is only
+  ever `null`), and `scripts/smoke.mjs` still asserts the old timeline's
+  source shape — it currently guards a renderer the app does not use.
+  `stepName()` lost its only UI caller (the "One column = …" hint was
+  removed with the timeline); the function and its unit tests remain.
+- `riff.html` has TWO `#tab-editor` divs (one in Notation, one in the
+  Fingering → Tab panel). `getElementById` mounts the editor into the
+  FIRST, so the Tab panel is permanently empty. The chord panel's intro
+  paragraph is also duplicated verbatim.
+
+Drag-and-drop (see Backlog) is Phase 2; it waits on this being seen in a
+browser, fixed, and committed.
+
 **Audio baseline (unchanged, on `main`):** all approved audio work is merged
 into `main` (and pushed to `origin/main`): the physical string core (commuted
 triangle pluck at per-string `pickPos` → fractional-delay allpass → two-stage
@@ -407,6 +462,15 @@ on a "lanes have different lengths" error). When you touch a notation example,
 only opens a comment at the **start** of a token, so `C Am F#m7 Bb7 # cadence`
 keeps all four chords; a mid-token `#` is a sharp.
 
+> **Status (Oct 1 2026): SUPERSEDED in the working tree.** `riff-main.ts` no
+> longer calls `renderRiffTimeline` — the unified track view (`src/track.ts`,
+> see "In flight" above) renders in its place. The function, its CSS and its
+> `smoke.mjs` assertions all still exist and pass, so the suite currently
+> guards a renderer the app does not use; delete or repoint them when the
+> track view lands. The invariant below is still the law — `src/timeline.ts`
+> is its pure-geometry home and `track.ts` obeys the same rule — so the
+> lessons are kept verbatim.
+
 `src/render.ts`'s `renderRiffTimeline` is a per-string grid. **The invariant:
 everything horizontal is a FRACTION OF THE TRACK.** Notes (`left: %` of the
 track), bar marks (`--riff-bar-start` × 100% of the bar track), the loop region
@@ -455,8 +519,8 @@ that fills, and assert the note COUNT: a probe that skips missing notes reports
 
 - `index.html` (the finder), `riff.html` (the riff builder) + `src/riff-main.ts`
   (its entry point) — two pages, dark theme. CSS class prefixes: `fb-`
-  (fretboard positions), `cd-` (chord diagram), `riff-` (riff timeline and
-  `voicing-` for the picker),
+  (fretboard positions), `cd-` (chord diagram), `riff-` (riff notation/reading
+  and `voicing-` for the picker), `track-` (the unified track view),
   `.diagrams`, `.chord-card`.
 - `src/theory.ts` — pitch classes, parsing, tunings, chord-name identification.
 - `src/fretboard.ts` — `findPositions` + `findFingerings` (guitar core algorithm).
@@ -522,6 +586,13 @@ that fills, and assert the note COUNT: a probe that skips missing notes reports
   per step). Clickable cells that generate lane text for the notation.
 - `src/tab-overlay.ts` — `buildOverlay(riff)`: pure chord/tab overlay logic,
   extracted from `riff-main.ts` so it is testable without a browser.
+- `src/timeline.ts` — pure timeline geometry (`trackFraction`,
+  `noteLeftPercent`, `barMarkFraction`, `stepColumns`,
+  `gridlinePeriodFraction`): every horizontal position as a fraction of the
+  track, no DOM, no px. Unit-tested in `tests/timeline.test.mjs`.
+- `src/track.ts` — `renderTrack` + `setTrackPlayhead`: the unified track view
+  (bar ruler + loop region + event blocks + per-string chips + one playhead
+  on a single canvas). In flight — see "In flight" at the top.
 - `src/main.ts` — UI wiring, form handling, guitar/piano orchestration (the
   finder's entry point; no riff code).
 - `src/riff-main.ts` — the riff builder's wiring: notation editor, voicing
@@ -915,6 +986,12 @@ Both `dev-audio` and `song-mode` remain as offline history only.
 
 ## Backlog / ideas (discuss with the user before building)
 
+- **Track drag-and-drop** (Phase 2 of the track feature — Phase 1, the track
+  view itself, is IN FLIGHT and uncommitted; see "In flight" at the top): the
+  track view is read-only. Next step is a palette of draggable items (chords,
+  notes) that can be dropped onto the track. Decision: build a thin `dnd.ts`
+  helper (~50 lines wrapping the native HTML5 drag-and-drop API) rather than
+  pulling in a framework or library. The app stays dependency-free.
 - **The sliced-kit pivot (IN FLIGHT — phase A landed, uncommitted).** See
   "progress 23" at the bottom of this file for the full write-up. In one line:
   the shipped smplr kits decode **all 88 notes (A0..C8, 2.6 MB) on every page

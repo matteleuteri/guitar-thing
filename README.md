@@ -1,7 +1,11 @@
-# Note/Chord Finder
+# Guitar Thing
 
-A tiny dependency-free web app that shows every fretboard position of a set of notes and
-every chord voicing (with optional sound) that stays within a small fret span.
+A tiny web app for guitarists. Two pages:
+
+1. **Note/Chord Finder** — shows every fretboard position of a set of notes and every
+   chord voicing (with optional sound) that stays within a small fret span.
+2. **Riff Builder** — write a chord stream and/or tab lane, hear it on a loop, and
+   walk each chord through its voicings until it's the shape you'd actually play.
 
 ## Run
 
@@ -10,20 +14,18 @@ npm install
 npm start        # builds + serves on http://localhost:5173
 ```
 
-`npm test` builds and runs a Node smoke suite: it asserts the theory/fingering/voicing
-invariants and perf, plus stubs Web Audio to check the scheduling/strum graph.
+That's it — `npm start` compiles TypeScript and starts the server. The app must be
+served over HTTP (`file://` blocks ES modules), so use the included `server.mjs`
+rather than opening `index.html` directly.
 
-> The app must be served over HTTP (`file://` blocks ES modules), so use the included
-> `server.mjs` rather than opening `index.html` directly.
+Other commands:
 
-## Run locally
-
-```sh
-npm run build       # compile TS to dist/
-node server.mjs     # serve on http://localhost:5173
-```
-
-`npm start` does both in one step. `npm test` builds and runs the smoke suite.
+| Command | What it does |
+|---|---|
+| `npm run build` | Compile TS to `dist/` |
+| `npm test` | Build + run smoke suite (theory, fingering, audio scheduling, unit tests) |
+| `npm run debug` | Build + serve for the audio harness at `/debug/audio-debug.html` |
+| `npm run here` | Show branch/commit, whether `dist/` is stale, and unpushed changes |
 
 ## Deploy (GitHub Pages)
 
@@ -79,9 +81,10 @@ mini keyboards with the pressed keys filled in.
 
 <a href="./riff.html"><strong>Riff builder →</strong></a> is a separate page, not
 a mode on this one — the finder is already busy enough. Type a chord stream
-and/or a tab lane and hear it played back on a loop, with a speed slider, loop
-bounds and a per-string timeline you can click to audition single events. The
-timeline re-plans as you type, and **Play ▶** always plays what is in the box.
+and/or a tab lane and hear it played back on a loop, with a speed dial, loop
+bounds, an optional metronome and count-in, and a track view — event blocks
+over a per-string grid — you can click to audition single events. The track
+re-plans as you type, and **Play ▶** always plays what is in the box.
 
 **Walking a chord through its voicings** is the reason it is its own page. A
 chord name is pitch classes only — `C` carries no frets — so the app *searches*
@@ -99,7 +102,7 @@ One `best ▲` on the shipped `C Am F G` takes the whole progression from
 `xx201x xx221x xx321x xx000x` to `032010 032210 133211 320003` — the open
 shapes — and then ◀ ▶ walks the rest.
 
-**What you'll hear** above the timeline reads the plan back: one row per *moment*
+**What you'll hear** under the track reads the plan back: one row per *moment*
 with its bar, beat, seconds, the shape, the sounding note names, and whether the
 app picked the voicing or you did — so a mis-voice is visible before you press
 play. Click any row to hear that moment alone.
@@ -142,9 +145,8 @@ chords either way. The shipped example is padded; `C Am F G` is the same music.
 `step` sets the grid, and it takes a plain number of beats or a note-value
 name: `quarter`, `eighths`, `sixteenths`, `eighth triplets`, `1/8`, `16ths`,
 `grid 0.25` — all the same thing. Pick it to match your **fastest** note, not
-your average one, because a column is the smallest thing you can write. The
-hint under the timeline names the grid back at you. Any directive can carry a
-trailing `#` comment.
+your average one, because a column is the smallest thing you can write. Any
+directive can carry a trailing `#` comment.
 
 Tab lanes are `e B G D A E` (high `e` first, as you read them); **every character
 is one column**, so in each column `-` `.` `_` or a plain space is a rest, `x`

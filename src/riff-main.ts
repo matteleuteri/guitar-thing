@@ -12,11 +12,12 @@ import {
   type VoicingPin,
 } from "./song.js";
 import { DEFAULT_CONFIG } from "./synth/config.js";
-import { el, renderChordDiagram, renderRiffGrid, renderRiffReading, renderRiffTimeline, setRiffPlayhead } from "./render.js";
-import { parseRiff, secondsPerBeat, stepName, type Riff, type RiffEvent } from "./riff.js";
+import { el, renderChordDiagram, renderRiffGrid, renderRiffReading, setRiffPlayhead } from "./render.js";
+import { parseRiff, secondsPerBeat, type Riff, type RiffEvent } from "./riff.js";
 import { RiffTransport } from "./transport.js";
 import { TabEditor } from "./tab-editor.js";
 import { buildOverlay } from "./tab-overlay.js";
+import { renderTrack, setTrackPlayhead } from "./track.js";
 
 /**
  * Riff builder: the riff trainer as its own page, off the note/chord finder.
@@ -52,6 +53,7 @@ const summaryLine = document.getElementById("riff-summary") as HTMLSpanElement;
 const tabs = document.getElementById("voicing-tabs") as HTMLDivElement;
 const picker = document.getElementById("voicing-picker") as HTMLDivElement;
 const voicingSummary = document.getElementById("voicing-summary") as HTMLSpanElement;
+const trackEl = document.getElementById("track") as HTMLDivElement;
 
 const tuningSelect = document.getElementById("tuning") as HTMLSelectElement;
 const fretsInput = document.getElementById("frets") as HTMLInputElement;
@@ -226,6 +228,8 @@ const stop = () => {
   transport?.stop();
   transport = null;
   if (timelineEl && plan) setRiffPlayhead(timelineEl, plan.loop.start, plan.totalBeats);
+  const track = trackEl.firstElementChild as HTMLElement | null;
+  if (track && plan) setTrackPlayhead(track, plan.loop.start, plan.totalBeats);
   playButton.textContent = "Play ▶";
 };
 
@@ -347,6 +351,8 @@ function start() {
       return;
     }
     if (timelineEl) setRiffPlayhead(timelineEl, beat, riff.totalBeats);
+    const track = trackEl.firstElementChild as HTMLElement | null;
+    if (track) setTrackPlayhead(track, beat, riff.totalBeats);
     frame = requestAnimationFrame(follow);
   };
   frame = requestAnimationFrame(follow);
@@ -606,16 +612,14 @@ function refresh(): Riff | null {
   });
   output.appendChild(reading);
 
-  const box = renderRiffTimeline(riff.events, riff.beatsPerBar, riff.stepBeats, riff.totalBeats, {
+  // Unified track view: event blocks + per-string grid + playhead
+  const track = renderTrack(riff, {
     tuning: tuningNow,
     loop,
     onPlayEvent: (index) => playEvents([index]),
   });
-  timelineEl = box;
-  output.appendChild(box);
-  output.appendChild(
-    el("div", "muted riff-hint", `One column = ${stepName(riff.stepBeats)}. Click any note group, or any row above, to hear just that event.`),
-  );
+  trackEl.replaceChildren(track);
+
   renderVoicingPicker();
   return riff;
 }
@@ -668,5 +672,18 @@ for (const input of [scaleInput, loopStartInput, loopEndInput]) {
     }
   });
 }
+
+// Fingering tab switching
+const fingeringTabs = document.querySelectorAll<HTMLButtonElement>(".fingering-tab");
+const fingeringPanels = document.querySelectorAll<HTMLElement>(".fingering-panel");
+fingeringTabs.forEach((tab) => {
+  tab.addEventListener("click", () => {
+    fingeringTabs.forEach((t) => t.classList.remove("is-active"));
+    fingeringPanels.forEach((p) => { p.hidden = true; });
+    tab.classList.add("is-active");
+    const panel = document.querySelector<HTMLElement>(`.fingering-panel[data-panel="${tab.dataset.tab}"]`);
+    if (panel) panel.hidden = false;
+  });
+});
 
 refresh();

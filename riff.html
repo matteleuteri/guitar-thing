@@ -17,6 +17,41 @@
     </header>
 
     <main>
+      <section id="track-section">
+        <h2>Track <span id="riff-summary" class="muted"></span></h2>
+        <div id="track"></div>
+        <div class="field-row">
+          <div class="field">
+            <label for="riff-scale">Speed (%)</label>
+            <input id="riff-scale" type="number" min="25" max="200" step="5" value="100" title="Playback tempo as a percentage of the written tempo, for learning a riff slowly" />
+          </div>
+          <div class="field">
+            <label for="riff-loop-start">Loop from bar</label>
+            <input id="riff-loop-start" type="number" min="1" max="64" step="1" value="1" />
+          </div>
+          <div class="field">
+            <label for="riff-loop-end">Loop to bar</label>
+            <input id="riff-loop-end" type="number" min="1" max="64" step="1" value="4" />
+          </div>
+          <div class="field">
+            <label for="riff-metronome">Metronome</label>
+            <input id="riff-metronome" type="checkbox" title="Play a click track on every beat" />
+          </div>
+          <div class="field">
+            <label for="riff-countin">Count-in (bars)</label>
+            <input id="riff-countin" type="number" min="0" max="8" step="1" value="0" title="Bars of metronome click before the riff starts" />
+          </div>
+          <div class="field">
+            <label>&nbsp;</label>
+            <span class="riff-transport">
+              <button id="riff-play" type="button">Play ▶</button>
+              <button id="riff-stop" type="button">Stop</button>
+            </span>
+          </div>
+        </div>
+        <div id="riff-output"></div>
+      </section>
+
       <section id="notation">
         <h2>Notation</h2>
         <div class="field">
@@ -43,7 +78,6 @@ G|--------------------------------|</textarea
         <p id="riff-error" class="error" hidden></p>
         <div id="tab-editor" class="tab-editor"></div>
         <details class="riff-legend">
-          <summary>How to write this — syntax, the bar ruler, and what plays</summary>
           <summary>How to write this — syntax, the bar ruler, and what plays</summary>
           <div class="riff-legend-body">
             <ul>
@@ -97,91 +131,66 @@ G|--------------------------------|</textarea
         </details>
       </section>
 
-      <section id="voicing-settings">
-        <h2>Voicing search</h2>
-        <div class="field-row">
-          <div class="field">
-            <label for="tuning">Tuning</label>
-            <select id="tuning"></select>
-          </div>
-          <div class="field">
-            <label for="frets">Frets</label>
-            <input id="frets" type="number" min="7" max="24" value="15" />
-          </div>
-          <div class="field">
-            <label for="span">Max span</label>
-            <input id="span" type="number" min="1" max="24" value="5" />
-          </div>
-          <div class="field">
-            <label for="cap">Voicings / chord</label>
-            <input id="cap" type="number" min="1" max="10000" value="400" />
-          </div>
-          <div class="field">
-            <label for="strum">Strum speed (ms)</label>
-            <input id="strum" type="number" min="0" max="400" step="10" value="140" title="Delay between strings when a chord plays; 0 = all at once" />
-          </div>
-          <div class="field">
-            <label for="kit">Guitar sample</label>
-            <button id="kit" type="button" title="Switch the sampled guitar kit between steel-string acoustic and classical nylon">Steel-string acoustic</button>
-          </div>
+      <section id="fingering">
+        <h2>Fingering</h2>
+        <div class="fingering-tabs">
+          <button class="fingering-tab is-active" data-tab="chord" type="button">Chord</button>
+          <button class="fingering-tab" data-tab="tab" type="button">Tab</button>
         </div>
-        <details id="custom-tuning" hidden>
-          <summary>Custom tuning strings (low → high, note + optional octave, e.g. E2 A2 D3 G3 B3 E4)</summary>
-          <div class="custom-strings">
-            <input value="E2" /><input value="A2" /><input value="D3" /><input value="G3" /><input value="B3" /><input value="E4" />
+        <div class="fingering-panel" data-panel="chord">
+          <p class="muted">
+            Every chord in the stream, in order. Pick one, then step through its voicings — the list is ordered by how
+            little your hand moves from the chord before it, so the first few are the smoothest. <strong>Auto</strong>
+            hands the chord back to the search; a stepped choice is <em>pinned</em>, and the chords after it re-optimize
+            around it. <span id="voicing-summary" class="muted"></span>
+          </p>
+          <div class="field-row">
+            <div class="field">
+              <label for="tuning">Tuning</label>
+              <select id="tuning"></select>
+            </div>
+            <div class="field">
+              <label for="frets">Frets</label>
+              <input id="frets" type="number" min="7" max="24" value="15" />
+            </div>
+            <div class="field">
+              <label for="span">Max span</label>
+              <input id="span" type="number" min="1" max="24" value="5" />
+            </div>
+            <div class="field">
+              <label for="cap">Voicings / chord</label>
+              <input id="cap" type="number" min="1" max="10000" value="400" />
+            </div>
+            <div class="field">
+              <label for="strum">Strum speed (ms)</label>
+              <input id="strum" type="number" min="0" max="400" step="10" value="140" title="Delay between strings when a chord plays; 0 = all at once" />
+            </div>
+            <div class="field">
+              <label for="kit">Guitar sample</label>
+              <button id="kit" type="button" title="Switch the sampled guitar kit between steel-string acoustic and classical nylon">Steel-string acoustic</button>
+            </div>
           </div>
-        </details>
-      </section>
-
-      <section id="voicings">
-        <h2>Chord voicings <span id="voicing-summary" class="muted"></span></h2>
-        <p class="muted">
-          Every chord in the stream, in order. Pick one, then step through its voicings — the list is ordered by how
-          little your hand moves from the chord before it, so the first few are the smoothest. <strong>Auto</strong>
-          hands the chord back to the search; a stepped choice is <em>pinned</em>, and the chords after it re-optimize
-          around it.
-        </p>
-        <div id="voicing-tabs" class="voicing-tabs"></div>
-        <div id="voicing-picker" class="voicing-picker"></div>
-      </section>
-
-      <section id="playback">
-        <h2>Playback</h2>
-        <div class="field-row">
-          <div class="field">
-            <label for="riff-scale">Speed (%)</label>
-            <input id="riff-scale" type="number" min="25" max="200" step="5" value="100" title="Playback tempo as a percentage of the written tempo, for learning a riff slowly" />
-          </div>
-          <div class="field">
-            <label for="riff-loop-start">Loop from bar</label>
-            <input id="riff-loop-start" type="number" min="1" max="64" step="1" value="1" />
-          </div>
-          <div class="field">
-            <label for="riff-loop-end">Loop to bar</label>
-            <input id="riff-loop-end" type="number" min="1" max="64" step="1" value="4" />
-          </div>
-          <div class="field">
-            <label for="riff-metronome">Metronome</label>
-            <input id="riff-metronome" type="checkbox" title="Play a click track on every beat" />
-          </div>
-          <div class="field">
-            <label for="riff-countin">Count-in (bars)</label>
-            <input id="riff-countin" type="number" min="0" max="8" step="1" value="0" title="Bars of metronome click before the riff starts" />
-          </div>
-          <div class="field">
-            <label>&nbsp;</label>
-            <span class="riff-transport">
-              <button id="riff-play" type="button">Play ▶</button>
-              <button id="riff-stop" type="button">Stop</button>
-            </span>
-          </div>
+          <details id="custom-tuning" hidden>
+            <summary>Custom tuning strings (low → high, note + optional octave, e.g. E2 A2 D3 G3 B3 E4)</summary>
+            <div class="custom-strings">
+              <input value="E2" /><input value="A2" /><input value="D3" /><input value="G3" /><input value="B3" /><input value="E4" />
+            </div>
+          </details>
+          <p class="muted">
+            Every chord in the stream, in order. Pick one, then step through its voicings — the list is ordered by how
+            little your hand moves from the chord before it, so the first few are the smoothest. <strong>Auto</strong>
+            hands the chord back to the search; a stepped choice is <em>pinned</em>, and the chords after it re-optimize
+            around it.
+          </p>
+          <div id="voicing-tabs" class="voicing-tabs"></div>
+          <div id="voicing-picker" class="voicing-picker"></div>
+        </div>
+        <div class="fingering-panel" data-panel="tab" hidden>
+          <div id="tab-editor" class="tab-editor"></div>
         </div>
       </section>
 
-      <section id="output">
-        <h2>What you'll hear <span id="riff-summary" class="muted"></span></h2>
-        <div id="riff-output"></div>
-      </section>
+
     </main>
 
     <script type="module" src="./dist/riff-main.js"></script>

@@ -222,6 +222,173 @@ header p { color: var(--muted); max-width: 70ch; margin-top: .25rem; }
 .riff-warning { color: var(--error); font-size: .8rem; margin-bottom: .3rem; }
 .riff-hint { font-size: .78rem; margin-top: .5rem; }
 
+/* Fingering tabs */
+.fingering-tabs {
+  display: flex;
+  gap: .5rem;
+  margin-bottom: .75rem;
+}
+.fingering-tab {
+  padding: .4rem 1rem;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: .8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s;
+}
+.fingering-tab:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.fingering-tab.is-active {
+  background: rgba(76, 194, 255, .12);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.fingering-panel {
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Track view                                                          */
+/* ------------------------------------------------------------------ */
+
+.track {
+  --track-gutter: 1.4rem;
+  --track-step: 2rem;
+  --track-endpad: 4rem;
+  overflow-x: auto;
+  margin-top: .5rem;
+  position: relative;
+  /* Scrollable breathing room at both ends. A `.track-block` is centered on
+     its beat with `translate(-50%, -50%)`, so the block at beat 0 hangs half
+     its width off the canvas's LEFT edge — and left-side overflow of a scroll
+     container is clipped, not scrollable, so it rendered half cut off (same
+     for the last block on the right). The container's own padding IS part of
+     the scrollable area, so the edge blocks render whole and the track reads
+     as starting a little before beat 0. This must be padding on the
+     CONTAINER, not the canvas: canvas padding would join its padding box, so
+     the beat fractions would stretch across the pad and beat 0 would still
+     sit at the clipped edge. */
+  padding: 0 var(--track-endpad);
+}
+.track-canvas {
+  position: relative;
+  width: calc(var(--track-cols) * var(--track-step));
+  height: 12rem;
+}
+.track-bar-track {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1.6rem;
+}
+.track-bar {
+  position: absolute;
+  left: calc(var(--track-bar-start, 0) * 100%);
+  top: 0;
+  font-family: ui-monospace, monospace;
+  font-size: .75rem;
+  color: var(--muted);
+  padding-left: 2px;
+}
+.track-loop {
+  --loop-tint: rgba(76, 194, 255, .07);
+  position: absolute;
+  top: 1.6rem;
+  bottom: .3rem;
+  left: calc(var(--track-loop-a, 0) * 100%);
+  width: calc((var(--track-loop-b, 0) - var(--track-loop-a, 0)) * 100%);
+  background: var(--loop-tint);
+  border-left: 1px solid rgba(76, 194, 255, .35);
+  border-right: 1px solid rgba(76, 194, 255, .35);
+  z-index: 0;
+}
+/* Loop-highlight bleed into the end padding. When the loop starts at beat 0
+   (or ends at the last beat), the block centered on that beat overhangs the
+   canvas into the container's end padding — bleed the tint so the block sits
+   on the blue. Only the BACKGROUND extends: the region's own borders keep
+   marking the exact loop bounds, and an interior loop gets no bleed (track.ts
+   adds the classes). The width is the container's --track-endpad so the tint
+   meets the scroll edge exactly. */
+.track-loop-at-start::before,
+.track-loop-at-end::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: var(--track-endpad);
+  background: var(--loop-tint);
+}
+.track-loop-at-start::before { right: 100%; }
+.track-loop-at-end::after { left: 100%; }
+.track-block {
+  position: absolute;
+  top: 2.5rem;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: .4rem .6rem;
+  border-radius: 5px;
+  font-size: .85rem;
+  z-index: 2;
+  white-space: nowrap;
+}
+.track-chord {
+  background: rgba(76, 194, 255, .15);
+  border: 1px solid rgba(76, 194, 255, .4);
+}
+.track-note {
+  background: rgba(147, 163, 180, .15);
+  border: 1px solid rgba(147, 163, 180, .35);
+}
+.track-name {
+  font-weight: 600;
+  font-size: .85rem;
+}
+.track-shape {
+  font-family: ui-monospace, monospace;
+  font-size: .7rem;
+  color: var(--muted);
+}
+.track-clickable { cursor: pointer; }
+.track-clickable:hover { filter: brightness(1.3); }
+.track-playhead {
+  position: absolute;
+  top: 1.6rem;
+  bottom: .3rem;
+  width: 2px;
+  left: calc(var(--track-head-frac, 0) * 100%);
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(76, 194, 255, .8);
+  pointer-events: none;
+  z-index: 3;
+}
+.track-chip {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+}
+.track-chip-fret {
+  min-width: 1.15rem;
+  padding: 0 .15rem;
+  border-radius: 3px;
+  font-family: ui-monospace, monospace;
+  font-size: .68rem;
+  font-weight: 600;
+  text-align: center;
+  color: #06121c;
+  background: var(--muted);
+}
+
 .field {
   display: flex;
   flex-direction: row;
