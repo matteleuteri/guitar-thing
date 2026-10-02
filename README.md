@@ -82,9 +82,13 @@ mini keyboards with the pressed keys filled in.
 <a href="./riff.html"><strong>Riff builder →</strong></a> is a separate page, not
 a mode on this one — the finder is already busy enough. Type a chord stream
 and/or a tab lane and hear it played back on a loop, with a speed dial, loop
-bounds, an optional metronome and count-in, and a track view — event blocks
-over a per-string grid — you can click to audition single events. The track
+bounds, an optional metronome and count-in, and a track view — DAW-style
+regions that show what plays when and for how long — you can click to
+audition single events. The track
 re-plans as you type, and **Play ▶** always plays what is in the box.
+Playback opens with a one-beat pause — the playhead sweeps the empty first
+beat (a click, if the metronome is on) so you can settle before the first
+note lands.
 
 **Walking a chord through its voicings** is the reason it is its own page. A
 chord name is pitch classes only — `C` carries no frets — so the app *searches*

@@ -13,7 +13,16 @@
  * the playhead at the SAME beat resolve to the SAME fraction. A note at
  * `left: 0%` and a playhead at beat 0 must land on the same pixel, and so must
  * a note at beat 14 and a playhead passing beat 14.
+ *
+ * Lead-in: the track can open with empty beats BEFORE beat 0 (the riff page
+ * plays a one-beat pause). The timeline then spans [-leadIn, totalBeats], so
+ * beat 0 sits one lead-in's width in from the left edge and a playhead in the
+ * pause sweeps from 0 up to it. Every position takes the same lead-in, which
+ * is the whole point: the invariant above is untouched, just shifted.
  */
+
+/** Empty beats the riff page shows (and plays) before the music starts. */
+export const LEAD_IN_BEATS = 1;
 
 /** Column count: one column per step, rounded UP so the last event is never clipped. */
 export function stepColumns(totalBeats: number, stepBeats: number): number {
@@ -26,24 +35,25 @@ export function stepColumns(totalBeats: number, stepBeats: number): number {
  * clamped like every other position — a beat outside the piece would otherwise
  * render a note outside the track, which is invisible rather than wrong.
  */
-export function noteLeftPercent(beat: number, totalBeats: number): number {
-  return trackFraction(beat, totalBeats) * 100;
+export function noteLeftPercent(beat: number, totalBeats: number, leadInBeats = 0): number {
+  return trackFraction(beat, totalBeats, leadInBeats) * 100;
 }
 
 /**
  * A playhead (or loop edge) position as a fraction of the track, clamped to
  * [0, 1]. The clamp is what the CSS gets: a playhead that has run past the end
- * pins to the right edge instead of sliding out of the box, and the lead-in
- * before beat 0 pins to the left.
+ * pins to the right edge instead of sliding out of the box, and one still in
+ * the lead-in (a negative beat, before the music's beat 0) pins to the left.
  */
-export function trackFraction(beat: number, totalBeats: number): number {
-  if (!(totalBeats > 0)) return 0;
-  return Math.max(0, Math.min(1, beat / totalBeats));
+export function trackFraction(beat: number, totalBeats: number, leadInBeats = 0): number {
+  const span = totalBeats + leadInBeats;
+  if (!(span > 0)) return 0;
+  return Math.max(0, Math.min(1, (beat + leadInBeats) / span));
 }
 
-/** A bar mark's position as a fraction of the track. Bar 0 is the left edge. */
-export function barMarkFraction(bar: number, beatsPerBar: number, totalBeats: number): number {
-  return trackFraction(bar * beatsPerBar, totalBeats);
+/** A bar mark's position as a fraction of the track. Bar 0 starts the piece. */
+export function barMarkFraction(bar: number, beatsPerBar: number, totalBeats: number, leadInBeats = 0): number {
+  return trackFraction(bar * beatsPerBar, totalBeats, leadInBeats);
 }
 
 /** Fractional share of one step column, for tests and for the gridline period. */

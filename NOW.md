@@ -34,56 +34,47 @@ section of the page.
 
 ## What the in-flight work is
 
-The riff page's top section is being rebuilt as ONE unified track
-(`src/track.ts`): event blocks + per-string fret chips + a single playhead,
-all absolutely positioned against one canvas in one unit (fractions of the
-track, from `src/timeline.ts`). It replaces `renderRiffTimeline`, which
-`riff-main.ts` no longer calls.
+The riff page's top section is ONE track of **DAW-style regions**
+(`src/track.ts`): a bar ruler, a chord lane (name + auto-voiced shape), six
+string lanes (tab notes, with sticky letters + step gridlines), and the loop
+region + playhead overlaid on one canvas. Every event is a region — left
+edge exactly at its beat, width = its span — so the playhead touches a
+region's left edge the moment it sounds. Spans are inferred
+(`regionEnds`): a chord rings until the next chord, a tab note until the
+next tab note, the last of each kind to the piece end. It replaces
+`renderRiffTimeline`.
 
-**Motive:** the user hit a **misalignment** on an otherwise good-sounding
-playback — the event blocks and the per-string grid lived in separate
-positioning contexts (the grid had a string-label gutter, the blocks strip
-did not), so a block at beat N and its chips at beat N drifted apart. One
-canvas makes "same beat = same pixel" true by construction.
+**Motive — two user-reported misalignments:** (1) the event blocks and the
+per-string grid lived in separate positioning contexts and drifted apart →
+unified canvas. (2) the unified blocks were CENTERED on their beats, but
+the eye reads a timeline thing as starting at its left edge — the user
+measured the result as "off by a half beat" (and the maths agreed: a ~4rem
+block's left edge sits ~2rem early = one eighth-note column) →
+left-anchored regions, which also show duration as a bonus.
 
-## Next step: see it, then fix what you see
+**Also in the tree (Oct 1):** a **lead-in beat** — the track opens one beat
+before the music (`LEAD_IN_BEATS = 1`), and Play sweeps the empty beat
+(silent, or a click if the metronome is on) before the first region sounds.
+Play-time only: loop wraps go straight back to the loop start, so bar lines
+never drift against the metronome.
 
-The horizontal geometry is provably consistent (everything is a fraction of
-the same canvas), but the track has never been rendered in a browser. A
-static read of the working tree already turned up five likely-visible
-issues — verify by eye, fix, then commit:
+## Next step: see it, then commit
 
-1. ~~**First chord block half-clipped**~~ **FIXED (Oct 1)**: `.track` now
-   carries `padding: 0 var(--track-endpad)` (4rem), so the blocks centered
-   on the first/last beat render whole (container padding is scrollable
-   space; padding the canvas instead would have stretched the beat grid and
-   fixed nothing). The loop highlight bleeds into the pad to match
-   (`track-loop-at-start`/`-at-end` pseudo-elements), so an overhanging edge
-   block sits on the blue; the loop borders still mark the exact bounds.
-   Verify by eye anyway — the 4rem pad assumes a block half-width under
-   ~2.5rem.
-2. **Low-string chips overflow the canvas bottom**: chip rows are
-   `top: 5 + row*1.5rem` against a 12rem-high canvas, so the low-E row sits
-   at 12.5rem — below the canvas and below the loop highlight — and `.track`
-   grows a vertical scrollbar (`overflow-x: auto` forces `overflow-y: auto`).
-3. **No string lanes, lane letters or step gridlines** in the track — the
-   old timeline had all three. Chips float on bare canvas
-   (`--track-gutter: 1.4rem` is declared but never used).
-4. **Dead code**: `renderRiffTimeline`/`setRiffPlayhead` have no live caller
-   (`timelineEl` in `riff-main.ts` is only ever `null`), and `smoke.mjs`
-   still asserts the old timeline's source shape — it guards a renderer the
-   app does not use. Repoint or delete when the track lands.
-5. **`riff.html` has two `#tab-editor` divs** (Notation section + Fingering →
-   Tab panel). The editor mounts into the first, so the Tab panel is always
-   empty. The chord panel's intro paragraph is also duplicated verbatim.
+The geometry and span rules are tested (64 unit checks green), but the
+regions have never been rendered in a browser. Verify by eye, then:
 
-Then, in order:
+1. ~~Edge clipping~~, ~~chip overflow~~, ~~missing lanes~~ — all three died
+   with the regions redesign (regions don't overhang; lanes are flow rows
+   with letters + gridlines). Confirm by eye.
+2. **Dead code**: `renderRiffTimeline`/`setRiffPlayhead` have no live
+   caller, and `smoke.mjs` still guards the old timeline's source shape —
+   repoint or delete.
+3. **`riff.html` duplicate `#tab-editor`** — the Fingering → Tab panel is
+   always empty; the chord panel's intro paragraph is duplicated too.
 
-1. Fix what the browser shows, one commit per finding.
-2. Commit the track view.
-3. Only then consider **Phase 2: drag-and-drop** (a palette of chords/notes
-   dropped onto the track). Decision is already made: a thin `dnd.ts` helper
-   over the native HTML5 API, no framework. See `AGENTS.md` backlog.
+Then commit, and on to **Phase 2: drag-and-drop** — regions are the natural
+draggable unit. Decision already made: a thin `dnd.ts` over the native
+HTML5 API, no framework. See `AGENTS.md` backlog.
 
 ## House rules for whoever picks this up
 

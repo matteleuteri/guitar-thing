@@ -18,6 +18,7 @@ import { RiffTransport } from "./transport.js";
 import { TabEditor } from "./tab-editor.js";
 import { buildOverlay } from "./tab-overlay.js";
 import { renderTrack, setTrackPlayhead } from "./track.js";
+import { LEAD_IN_BEATS } from "./timeline.js";
 
 /**
  * Riff builder: the riff trainer as its own page, off the note/chord finder.
@@ -229,7 +230,8 @@ const stop = () => {
   transport = null;
   if (timelineEl && plan) setRiffPlayhead(timelineEl, plan.loop.start, plan.totalBeats);
   const track = trackEl.firstElementChild as HTMLElement | null;
-  if (track && plan) setTrackPlayhead(track, plan.loop.start, plan.totalBeats);
+  // Rest the playhead one lead-in beat before the loop: where playback starts.
+  if (track && plan) setTrackPlayhead(track, plan.loop.start - LEAD_IN_BEATS, plan.totalBeats, LEAD_IN_BEATS);
   playButton.textContent = "Play ▶";
 };
 
@@ -338,6 +340,7 @@ function start() {
   }, undefined, {
     metronome: metronomeInput.checked,
     countInBars: Math.min(8, Math.max(0, readInt(countInInput, 0))),
+    leadInBeats: LEAD_IN_BEATS,
   });
   next.setLoop(loopWindow(riff).start, loopWindow(riff).end);
   next.play();
@@ -352,7 +355,7 @@ function start() {
     }
     if (timelineEl) setRiffPlayhead(timelineEl, beat, riff.totalBeats);
     const track = trackEl.firstElementChild as HTMLElement | null;
-    if (track) setTrackPlayhead(track, beat, riff.totalBeats);
+    if (track) setTrackPlayhead(track, beat, riff.totalBeats, LEAD_IN_BEATS);
     frame = requestAnimationFrame(follow);
   };
   frame = requestAnimationFrame(follow);

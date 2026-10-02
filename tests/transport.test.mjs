@@ -22,7 +22,7 @@ const riffOpts = {
 };
 
 /** A transport on a hand-driven clock; no timers, no audio. */
-function harness(text, { loop, metronome = false, countInBars = 0 } = {}) {
+function harness(text, { loop, metronome = false, countInBars = 0, leadInBeats = 0 } = {}) {
   const riff = parseRiff(text, riffOpts);
   let clock = 0;
   const fired = [];
@@ -38,7 +38,7 @@ function harness(text, { loop, metronome = false, countInBars = 0 } = {}) {
       onClick: (beat, when, isDownbeat) => clicks.push({ beat, when, isDownbeat }),
     },
     { every: () => 1, clear: () => undefined },
-    { metronome, countInBars },
+    { metronome, countInBars, leadInBeats },
   );
   if (loop) transport.setLoop(loop[0], loop[1]);
   return {
@@ -252,6 +252,49 @@ test("count-in clicks include the count-in beats", () => {
   for (const beat of [-4, -3, -2, -1]) {
     assert.ok(clickBeats.includes(beat), `no count-in click on beat ${beat}`);
   }
+});
+
+// --- lead-in ---
+
+test("a lead-in beat delays every riff event by one beat, metronome or not", () => {
+  // The riff page opens with a one-beat pause: at 120bpm (0.5s/beat) the
+  // first event SOUNDS at 0.5s, not at 0. Events are placed up to one
+  // lookahead (0.3s) early, so compare sound times, not scheduling times.
+  const h = harness(EIGHTHS, { loop: [0, 4], leadInBeats: 1 });
+  h.transport.play(0);
+  h.run(2);
+  assert.ok(h.fired.length > 0, "no riff events fired at all");
+  const first = Math.min(...h.fired.map((f) => f.when));
+  assert.ok(Math.abs(first - 0.5) < 1e-6, `first event sounds at ${first}s, expected 0.5s`);
+});
+
+test("the playhead opens in the pause and crosses beat 0 one beat in", () => {
+  // The pause is visible: getBeat() is negative until the first event, so the
+  // track's playhead sweeps the empty beat instead of standing on the first
+  // block. After the wrap it starts at loopStart — the pause is Play-only.
+  const h = harness(EIGHTHS, { loop: [0, 4], leadInBeats: 1 });
+  h.transport.play(0);
+  const beats = h.sample(0.6);
+  assert.ok(beats[0] < 0, `playhead opened at ${beats[0]}, expected a negative beat`);
+  assert.ok(beats[beats.length - 1] > beats[0], "playhead did not sweep through the pause");
+  assert.ok(beats[beats.length - 1] <= 0.25, `playhead ran ahead of the pause: ${beats[beats.length - 1]}`);
+});
+
+test("the lead-in beat gets a click when the metronome is on", () => {
+  const h = harness(EIGHTHS, { loop: [0, 4], metronome: true, leadInBeats: 1 });
+  h.transport.play(0);
+  h.run(0.6);
+  assert.ok(h.clicks.some((c) => c.beat === -1), "no click on the lead-in beat");
+  // ...and it is not a downbeat: the pause belongs to no bar.
+  assert.ok(!h.clicks.some((c) => c.beat === -1 && c.isDownbeat), "lead-in beat flagged as downbeat");
+});
+
+test("no lead-in by default: the first event sounds at 0", () => {
+  const h = harness(EIGHTHS, { loop: [0, 4] });
+  h.transport.play(0);
+  h.run(2);
+  const first = Math.min(...h.fired.map((f) => f.when));
+  assert.ok(Math.abs(first - 0) < 1e-6, `first event sounds at ${first}s, expected 0s`);
 });
 
 test("metronome keeps clicking across loop wraps", () => {

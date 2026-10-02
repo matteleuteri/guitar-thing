@@ -70,6 +70,25 @@ test("position is clamped, so a playhead pins to an edge instead of leaving the 
   assert.equal(noteLeftPercent(-1, 16), 0);
 });
 
+test("a lead-in puts empty beats before beat 0, and everything shifts together", () => {
+  // The riff page opens the track with a one-beat pause: the timeline spans
+  // [-leadIn, total], so beat 0 sits one lead-in's width in and the pause
+  // sweeps [0, that width) before the first event.
+  const total = 16;
+  const lead = 1;
+  assert.equal(trackFraction(-lead, total, lead), 0, "the pause starts at the left edge");
+  assert.equal(trackFraction(0, total, lead), 1 / 17, "beat 0 sits one beat in");
+  assert.equal(trackFraction(-0.5, total, lead), 0.5 / 17, "a playhead mid-pause is mid-gap");
+  assert.equal(trackFraction(total, total, lead), 1, "the end still pins right");
+  assert.equal(trackFraction(-99, total, lead), 0, "before the pause still pins left");
+  // The invariant survives the shift: same beat = same fraction, everywhere.
+  assert.equal(noteLeftPercent(0, total, lead), trackFraction(0, total, lead) * 100);
+  assert.equal(barMarkFraction(0, 4, total, lead), trackFraction(0, total, lead));
+  assert.equal(barMarkFraction(3, 4, total, lead), trackFraction(12, total, lead));
+  // No lead-in by default: beat 0 is the left edge, exactly as before.
+  assert.equal(trackFraction(0, total), 0);
+});
+
 test("position increases monotonically with the beat", () => {
   let previous = -Infinity;
   for (let beat = 0; beat <= 16; beat += 0.0625) {

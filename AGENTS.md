@@ -80,60 +80,69 @@ finger-number/learning aids.
   whatever chord line is in the notation, so it is a live view of the chord
   stream (not just a one-way write).
 
-**In flight (uncommitted, Oct 1 2026) — the unified track view.** The riff
-page's top section is being rebuilt as ONE track (`src/track.ts`,
-`renderTrack`): bar ruler, loop region, event blocks (chord = blue, name +
-auto-voiced shape; tab = gray, fret numbers), per-string fret chips, and a
-single playhead, ALL absolutely positioned against one `.track-canvas` in one
-unit (fractions of the track, from `src/timeline.ts`). It replaces
-`renderRiffTimeline`, which `riff-main.ts` no longer calls. **Why:** the
-previous iteration had the event blocks and the per-string grid in SEPARATE
-positioning contexts (the grid had a string-label gutter, the blocks strip
-did not), so a block at beat N and its chips at beat N drifted apart — the
-misalignment the user reported on an otherwise good-sounding playback. One
-canvas makes "same beat = same pixel" true by construction instead of by
-agreement between two layouts. Status: `npm test` green; **NOT yet verified
-in a browser** — the geometry is provably consistent horizontally, but
-layout is pixels (see "layout still needs a browser" below). Known issues
-found by static read of the working tree (the first is fixed; the rest are
-still unconfirmed by eye):
+**In flight (uncommitted, Oct 1 2026) — the track view, now DAW-style
+regions.** The riff page's top section is ONE track (`src/track.ts`,
+`renderTrack`): a bar ruler, one chord lane (chord name + auto-voiced
+shape), six string lanes (tab notes, with sticky lane letters and step
+gridlines), and the loop region + playhead overlaid — every horizontal
+position a fraction of one `.track-canvas`, from `src/timeline.ts`. Every
+event is a REGION: left edge exactly at its start beat, width exactly its
+span, so the playhead touches a region's left edge the moment it sounds.
+The model has no explicit durations, so a region runs to the next event OF
+THE SAME KIND (`regionEnds`, tested in `tests/track.test.mjs`): a chord
+rings until the next chord (the harmonic rhythm), a tab note until the next
+tab note (a string rings through rests), the last of each kind to the piece
+end.
 
-- ~~`.track-block` edge clipping~~ **FIXED (Oct 1)** — confirmed by the
-  user's eye. Blocks are centered on their beat with
-  `translate(-50%, -50%)`, so the beat-0 block hung half off the canvas's
-  left edge and the scroll container clipped it (left overflow is not
-  scrollable). Fix: `.track` carries `padding: 0 var(--track-endpad)`
-  (4rem) — container padding IS scrollable space, so edge blocks render
-  whole and the track reads as starting a little before beat 0. Do NOT move
-  the pad onto the canvas: canvas padding joins its padding box, the beat
-  fractions would stretch across the pad, and beat 0 would still sit at the
-  clipped edge. The loop highlight got the matching treatment: when a loop
-  edge IS the track edge, `renderTrack` adds `track-loop-at-start`/`-at-end`
-  and a pseudo-element bleeds the tint into the end padding (width
-  `--track-endpad`), so an overhanging edge block sits on the blue — while
-  the region's own borders keep marking the exact loop bounds and an
-  interior loop gets no bleed.
-- Chip rows are `top: 5 + row * 1.5rem` against a 12rem-high canvas: the
-  low-E row sits at 12.5rem, BELOW the canvas (and below the loop highlight,
-  which ends at `bottom: .3rem` of the canvas). `overflow-x: auto` also makes
-  `overflow-y` compute to `auto`, so `.track` grows a vertical scrollbar.
-- The track has NO string lanes, lane letters or step gridlines — the old
-  timeline had all three (`--track-gutter: 1.4rem` is declared but never
-  used). Chips float on bare canvas, so a chip's string is only knowable
-  from its tooltip.
+**Why regions — three iterations, two user-reported misalignments.** (1)
+The event blocks and the per-string grid lived in SEPARATE positioning
+contexts, so a block at beat N and its chips drifted apart → unified into
+one canvas. (2) The unified blocks were CENTERED on their beats
+(`translate(-50%)`), but the eye reads a timeline thing as starting at its
+LEFT edge — the user measured the result by eye as "off by a half beat",
+and the maths agreed: a ~4rem block's left edge sits ~2rem early, exactly
+one eighth-note column. Left-anchored regions kill that reading by
+construction, and as a bonus they show duration (a bar-long chord visibly
+spans its bar).
+
+What the redesign fixed along the way: the chip rows that overflowed the
+12rem canvas (lanes are flow rows now — no fixed height), the missing
+string lanes/letters/gridlines (back, as `.track-lane`), and the edge-block
+clipping (regions don't overhang, so nothing clips). One alignment trap the
+user caught by eye AFTER the regions landed: the 4rem container padding
+that had un-clipped the old centered blocks now sat between the scrollbar
+and the canvas, and the two read as misaligned — so `.track` carries NO
+padding (the space before the music is the lead-in beat's own width, and
+padding the canvas instead would stretch the beat fractions across it).
+The playhead is centered on its beat (`translateX(-50%)`) so it straddles
+the exact position and stays half-visible at the flush canvas edges.
+
+**Lead-in beat (Oct 1, user's request):** the track opens one beat BEFORE
+the music — the timeline spans `[-1, totalBeats]` (`LEAD_IN_BEATS = 1` in
+`src/timeline.ts`), the canvas is one beat wider, and playback starts at
+beat −1 (`TransportOptions.leadInBeats` — the count-in's anchor shift,
+metronome-independent). Press Play and the playhead sweeps the empty beat
+in silence (a click if the metronome is on — never a downbeat) before the
+first region sounds. The pause is OUTSIDE the loop window, so it happens on
+Play, not on wraps — a 17-beat loop would drift the bar lines against the
+metronome. The geometry functions take `leadInBeats` (default 0), so the
+same-beat-same-pixel invariant is untouched, just shifted.
+
+Status: `npm test` green (64); **NOT yet verified in a browser.** Remaining
+known issues:
+
 - Dead code left behind: `renderRiffTimeline` + `setRiffPlayhead` in
   `render.ts` have no live caller (`timelineEl` in `riff-main.ts` is only
   ever `null`), and `scripts/smoke.mjs` still asserts the old timeline's
   source shape — it currently guards a renderer the app does not use.
-  `stepName()` lost its only UI caller (the "One column = …" hint was
-  removed with the timeline); the function and its unit tests remain.
+  `stepName()` lost its only UI caller; the function and its tests remain.
 - `riff.html` has TWO `#tab-editor` divs (one in Notation, one in the
   Fingering → Tab panel). `getElementById` mounts the editor into the
   FIRST, so the Tab panel is permanently empty. The chord panel's intro
   paragraph is also duplicated verbatim.
 
-Drag-and-drop (see Backlog) is Phase 2; it waits on this being seen in a
-browser, fixed, and committed.
+Drag-and-drop (see Backlog) is Phase 2; regions are the natural draggable
+unit. It waits on this being seen in a browser and committed.
 
 **Audio baseline (unchanged, on `main`):** all approved audio work is merged
 into `main` (and pushed to `origin/main`): the physical string core (commuted
@@ -581,7 +590,8 @@ that fills, and assert the note COUNT: a probe that skips missing notes reports
   + tab lane" parser. See "Riff trainer" above.
 - `src/transport.ts` — `RiffTransport`, the lookahead scheduler behind the riff
   builder's playback (injected clock/ticker so the smoke test can drive it).
-  Carries `TransportOptions` (`metronome`, `countInBars`) and a `onClick` callback.
+  Carries `TransportOptions` (`metronome`, `countInBars`, `leadInBeats`) and
+  a `onClick` callback.
 - `src/tab-editor.ts` — the visual tab editor grid (one row per string, one column
   per step). Clickable cells that generate lane text for the notation.
 - `src/tab-overlay.ts` — `buildOverlay(riff)`: pure chord/tab overlay logic,
@@ -589,7 +599,9 @@ that fills, and assert the note COUNT: a probe that skips missing notes reports
 - `src/timeline.ts` — pure timeline geometry (`trackFraction`,
   `noteLeftPercent`, `barMarkFraction`, `stepColumns`,
   `gridlinePeriodFraction`): every horizontal position as a fraction of the
-  track, no DOM, no px. Unit-tested in `tests/timeline.test.mjs`.
+  track, no DOM, no px. Also home of `LEAD_IN_BEATS` — the empty beats the
+  track shows (and the transport plays) before the music starts.
+  Unit-tested in `tests/timeline.test.mjs`.
 - `src/track.ts` — `renderTrack` + `setTrackPlayhead`: the unified track view
   (bar ruler + loop region + event blocks + per-string chips + one playhead
   on a single canvas). In flight — see "In flight" at the top.

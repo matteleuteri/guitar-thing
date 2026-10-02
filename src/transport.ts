@@ -32,6 +32,12 @@ export interface TransportOptions {
   metronome: boolean;
   /** Bars of metronome-only count-in before the riff starts (0 = none). */
   countInBars: number;
+  /**
+   * Empty beats before the riff starts — a pause. Unlike the count-in it
+   * needs no metronome (the pause is silent if the click is off), and unlike
+   * both it is OUTSIDE the loop, so it happens on Play, not on every wrap.
+   */
+  leadInBeats?: number;
 }
 
 /** Timer seam, so a test can drive `advance()` instead of real time. */
@@ -77,6 +83,7 @@ export class RiffTransport {
   private nextClickBeat = 0;
   private readonly metronome: boolean;
   private readonly countInBars: number;
+  private readonly leadInBeats: number;
 
   constructor(
     riff: Riff,
@@ -91,6 +98,7 @@ export class RiffTransport {
     this.ticker = ticker;
     this.metronome = options.metronome;
     this.countInBars = options.countInBars;
+    this.leadInBeats = options.leadInBeats ?? 0;
     this.loopStart = riff.loop.start;
     this.loopEnd = riff.loop.end;
     this.queue = this.eventsInWindow(this.loopStart, this.loopEnd);
@@ -136,9 +144,11 @@ export class RiffTransport {
     this.stop();
     this.queue = this.eventsInWindow(this.loopStart, this.loopEnd);
     this.queueIndex = 0;
-    // A count-in shifts the anchor beat back so the riff starts N bars later.
-    // The metronome clicks through the count-in, then the riff begins.
-    this.anchorBeat = this.loopStart - this.countInBars * this.riff.beatsPerBar;
+    // A count-in shifts the anchor beat back so the riff starts N bars later;
+    // a lead-in does the same in beats. The metronome clicks through both
+    // (if it is on), then the riff begins. Neither survives a loop wrap —
+    // advancePass re-anchors at loopStart, so the pause is a Play-time pause.
+    this.anchorBeat = this.loopStart - this.countInBars * this.riff.beatsPerBar - this.leadInBeats;
     this.anchorTime = this.callbacks.now() + leadIn;
     this.playBeat = this.anchorBeat;
     this.playTime = this.anchorTime;

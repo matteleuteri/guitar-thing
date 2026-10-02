@@ -259,35 +259,32 @@ header p { color: var(--muted); max-width: 70ch; margin-top: .25rem; }
 /* ------------------------------------------------------------------ */
 
 .track {
-  --track-gutter: 1.4rem;
   --track-step: 2rem;
-  --track-endpad: 4rem;
+  --track-ruler-h: 1.6rem;
   overflow-x: auto;
   margin-top: .5rem;
   position: relative;
-  /* Scrollable breathing room at both ends. A `.track-block` is centered on
-     its beat with `translate(-50%, -50%)`, so the block at beat 0 hangs half
-     its width off the canvas's LEFT edge — and left-side overflow of a scroll
-     container is clipped, not scrollable, so it rendered half cut off (same
-     for the last block on the right). The container's own padding IS part of
-     the scrollable area, so the edge blocks render whole and the track reads
-     as starting a little before beat 0. This must be padding on the
-     CONTAINER, not the canvas: canvas padding would join its padding box, so
-     the beat fractions would stretch across the pad and beat 0 would still
-     sit at the clipped edge. */
-  padding: 0 var(--track-endpad);
+  /* NO container padding: the scrollbar spans the whole element, so any
+     padding sits between the scrollbar and the canvas and the two read as
+     misaligned (the user measured it by eye). The space before the music is
+     the lead-in beat's own width, so padding earns nothing. (It once existed
+     to un-clip CENTERED blocks that overhung the canvas; regions don't. And
+     never move the space onto the canvas instead: canvas padding joins its
+     padding box, so the beat fractions would stretch across it.) */
 }
+/* The canvas is exactly as wide as the step grid and exactly as tall as its
+   flow rows (ruler + lanes) — a fixed height is what the low-string chips
+   used to overflow. Every positioned child (bar marks, regions, loop,
+   playhead) measures percentages against THIS box, so 100% always means the
+   same width. */
 .track-canvas {
   position: relative;
   width: calc(var(--track-cols) * var(--track-step));
-  height: 12rem;
 }
 .track-bar-track {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1.6rem;
+  position: relative;
+  height: var(--track-ruler-h);
+  border-bottom: 1px solid rgba(255, 255, 255, .08);
 }
 .track-bar {
   position: absolute;
@@ -298,11 +295,87 @@ header p { color: var(--muted); max-width: 70ch; margin-top: .25rem; }
   color: var(--muted);
   padding-left: 2px;
 }
+/* One lane per row, in flow: the chord lane, then six string lanes. The
+   step gridlines repeat per column with a period that is a FRACTION of the
+   lane (whose width is the canvas) — never a px step, which would drift
+   against the regions the moment the canvas grows. */
+.track-lane {
+  position: relative;
+  height: 1.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, .05);
+  background:
+    repeating-linear-gradient(
+      to right,
+      rgba(255, 255, 255, .07) 0 1px,
+      transparent 1px calc(100% / var(--track-cols))
+    );
+}
+.track-chord-lane {
+  height: 2.1rem;
+}
+/* The string letter pins to the visible left edge while scrolling (sticky),
+   on an opaque chip so regions slide cleanly under it. */
+.track-lane-letter {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  display: inline-block;
+  width: 1.2rem;
+  line-height: inherit;
+  text-align: center;
+  font-family: ui-monospace, monospace;
+  font-size: .7rem;
+  color: var(--muted);
+  background: var(--bg);
+  height: 100%;
+}
+/* A region's LEFT edge is its start beat and its width is its span — no
+   centering. The playhead touches the left edge at the moment it sounds. */
+.track-region {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+  padding: 0 .45rem;
+  border-radius: 4px;
+  overflow: hidden;
+  white-space: nowrap;
+  z-index: 1;
+}
+.track-chord-region {
+  height: 1.75rem;
+  background: rgba(76, 194, 255, .15);
+  border: 1px solid rgba(76, 194, 255, .4);
+  border-left: 3px solid rgba(76, 194, 255, .8);
+}
+.track-note-region {
+  height: 1.2rem;
+  color: #06121c;
+  border-left: 2px solid rgba(0, 0, 0, .5);
+}
+.track-region-name {
+  font-weight: 600;
+  font-size: .85rem;
+}
+.track-region-shape {
+  font-family: ui-monospace, monospace;
+  font-size: .7rem;
+  color: var(--muted);
+}
+.track-region-fret {
+  font-family: ui-monospace, monospace;
+  font-size: .68rem;
+  font-weight: 600;
+}
+.track-clickable { cursor: pointer; }
+.track-clickable:hover { filter: brightness(1.3); }
 .track-loop {
   --loop-tint: rgba(76, 194, 255, .07);
   position: absolute;
-  top: 1.6rem;
-  bottom: .3rem;
+  top: var(--track-ruler-h);
+  bottom: 0;
   left: calc(var(--track-loop-a, 0) * 100%);
   width: calc((var(--track-loop-b, 0) - var(--track-loop-a, 0)) * 100%);
   background: var(--loop-tint);
@@ -310,83 +383,20 @@ header p { color: var(--muted); max-width: 70ch; margin-top: .25rem; }
   border-right: 1px solid rgba(76, 194, 255, .35);
   z-index: 0;
 }
-/* Loop-highlight bleed into the end padding. When the loop starts at beat 0
-   (or ends at the last beat), the block centered on that beat overhangs the
-   canvas into the container's end padding — bleed the tint so the block sits
-   on the blue. Only the BACKGROUND extends: the region's own borders keep
-   marking the exact loop bounds, and an interior loop gets no bleed (track.ts
-   adds the classes). The width is the container's --track-endpad so the tint
-   meets the scroll edge exactly. */
-.track-loop-at-start::before,
-.track-loop-at-end::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: var(--track-endpad);
-  background: var(--loop-tint);
-}
-.track-loop-at-start::before { right: 100%; }
-.track-loop-at-end::after { left: 100%; }
-.track-block {
-  position: absolute;
-  top: 2.5rem;
-  transform: translate(-50%, -50%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  padding: .4rem .6rem;
-  border-radius: 5px;
-  font-size: .85rem;
-  z-index: 2;
-  white-space: nowrap;
-}
-.track-chord {
-  background: rgba(76, 194, 255, .15);
-  border: 1px solid rgba(76, 194, 255, .4);
-}
-.track-note {
-  background: rgba(147, 163, 180, .15);
-  border: 1px solid rgba(147, 163, 180, .35);
-}
-.track-name {
-  font-weight: 600;
-  font-size: .85rem;
-}
-.track-shape {
-  font-family: ui-monospace, monospace;
-  font-size: .7rem;
-  color: var(--muted);
-}
-.track-clickable { cursor: pointer; }
-.track-clickable:hover { filter: brightness(1.3); }
 .track-playhead {
   position: absolute;
-  top: 1.6rem;
-  bottom: .3rem;
+  top: var(--track-ruler-h);
+  bottom: 0;
   width: 2px;
   left: calc(var(--track-head-frac, 0) * 100%);
+  /* Centered on its beat (not starting at it), so it straddles the exact
+     position like a DAW line and stays half-visible at the canvas edges —
+     flush at fraction 1 it would otherwise clip to nothing. */
+  transform: translateX(-50%);
   background: var(--accent);
   box-shadow: 0 0 6px rgba(76, 194, 255, .8);
   pointer-events: none;
   z-index: 3;
-}
-.track-chip {
-  position: absolute;
-  transform: translate(-50%, -50%);
-  z-index: 2;
-}
-.track-chip-fret {
-  min-width: 1.15rem;
-  padding: 0 .15rem;
-  border-radius: 3px;
-  font-family: ui-monospace, monospace;
-  font-size: .68rem;
-  font-weight: 600;
-  text-align: center;
-  color: #06121c;
-  background: var(--muted);
 }
 
 .field {
