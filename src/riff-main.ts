@@ -3,7 +3,9 @@ import { chordShape } from "./fretboard.js";
 import {
   chordName,
   midiName,
+  noteLabels,
   noteName,
+  parseChord,
   parseStringMidi,
   TUNINGS,
 } from "./theory.js";
@@ -12,13 +14,25 @@ import {
   type VoicingPin,
 } from "./song.js";
 import { DEFAULT_CONFIG } from "./synth/config.js";
-import { el, renderChordDiagram, renderRiffGrid, renderRiffReading, setRiffPlayhead } from "./render.js";
+import { el, colorFor, renderChordDiagram, renderRiffGrid, renderRiffReading, setRiffPlayhead } from "./render.js";
 import { parseRiff, secondsPerBeat, type Riff, type RiffEvent } from "./riff.js";
 import { RiffTransport } from "./transport.js";
 import { TabEditor } from "./tab-editor.js";
 import { buildOverlay } from "./tab-overlay.js";
-import { renderTrack, setTrackPlayhead } from "./track.js";
+import { renderTrack, setTrackPlayhead, type DragPayload } from "./track.js";
 import { LEAD_IN_BEATS } from "./timeline.js";
+import { makeDraggable } from "./dnd.js";
+import {
+  CHORD_REST,
+  addChordToken,
+  chordTokensFromText,
+  fretForPitchClass,
+  moveChordToken,
+  moveLaneNote,
+  replaceChordLine,
+  setLaneNote,
+  tokenIndexForChordOrdinal,
+} from "./track-edit.js";
 
 /**
  * Riff builder: the riff trainer as its own page, off the note/chord finder.
@@ -55,6 +69,9 @@ const tabs = document.getElementById("voicing-tabs") as HTMLDivElement;
 const picker = document.getElementById("voicing-picker") as HTMLDivElement;
 const voicingSummary = document.getElementById("voicing-summary") as HTMLSpanElement;
 const trackEl = document.getElementById("track") as HTMLDivElement;
+const chordChips = document.getElementById("chord-chips") as HTMLDivElement;
+const noteChips = document.getElementById("note-chips") as HTMLDivElement;
+const chordAddInput = document.getElementById("chord-add") as HTMLInputElement;
 
 const tuningSelect = document.getElementById("tuning") as HTMLSelectElement;
 const fretsInput = document.getElementById("frets") as HTMLInputElement;
@@ -82,6 +99,41 @@ for (const tuning of TUNINGS) {
 }
 tuningSelect.addEventListener("change", () => {
   customTuning.hidden = tuningSelect.value !== "custom";
+});
+
+// ------------------------------------------------------------ undo ----
+
+/**
+ * Snapshots of the notation taken before every PROGRAMMATIC rewrite (a drag
+ * drop, a builder-chip add, a tab-editor cell, a progression-input apply —
+ * they all funnel through the two `text.value = ...` sites). Native textarea
+ * undo is useless here because setting `.value` from script clears its stack,
+ * so the app keeps its own. User typing into the box is left to the native
+ * undo; this stack is for edits the user made by clicking/dragging.
+ */
+const undoStack: string[] = [];
+const UNDO_CAP = 50;
+const undoButton = document.getElementById("riff-undo") as HTMLButtonElement;
+
+function updateUndoButton(): void {
+  undoButton.disabled = undoStack.length === 0;
+}
+
+/** Record the current notation before overwriting it. No-op if unchanged. */
+function pushUndo(): void {
+  if (undoStack[undoStack.length - 1] === text.value) return;
+  undoStack.push(text.value);
+  if (undoStack.length > UNDO_CAP) undoStack.shift();
+  updateUndoButton();
+}
+
+undoButton.addEventListener("click", () => {
+  const previous = undoStack.pop();
+  if (previous === undefined) return;
+  text.value = previous;
+  updateUndoButton();
+  stop();
+  refresh();
 });
 
 // --------------------------------------------------------- tab editor ----
@@ -150,7 +202,10 @@ function updateTabLanes(lanes: Map<number, (number | "x" | null)[]>): void {
     }
   }
   newLines.splice(insertAt, 0, ...laneLines);
-  text.value = newLines.join("\n");
+  const next = newLines.join("\n");
+  if (next === text.value) return;
+  pushUndo();
+  text.value = next;
   stop();
   refresh();
 }
@@ -168,20 +223,7 @@ function syncTabEditor(): void {
  * there is no loop with applyProgression.
  */
 function syncProgressionInput(): void {
-  const lines = text.value.split("\n");
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith("//")) continue;
-    if (/^\s*[eBGDAE]\s*\|/.test(line)) continue;
-    if (/^(tempo|bpm|bar|step|grid|strum|release)\s+/i.test(trimmed)) continue;
-    // This is the chord line: extract just the chord tokens.
-    const tokens = trimmed.split(/[\s,;|]+/).filter(
-      (t) => t && !t.startsWith("#") && !t.startsWith("//"),
-    );
-    if (tokens.length > 0) progressionInput.value = tokens.join(" ");
-    return;
-  }
-  progressionInput.value = "";
+  progressionInput.value = chordTokensFromText(text.value).join(" ");
 }
 
 // The kit label is set after `preloadGuitarEngine` above, which may already have
@@ -281,9 +323,10 @@ function formatChordLine(chords: string[], beatsPerBar: number, stepBeats: numbe
 }
 
 /**
- * Replace the chord line in the notation with the progression from the input.
- * Tab lanes, directives, and comments are preserved. The chord line is the
- * first non-directive, non-tab-lane, non-comment line in the notation.
+ * Replace the chord line in the notation with the progression from the input
+ * (or INSERT one after the directives when the riff has none — a tab-only
+ * riff gaining its first chord via a builder chip). Tab lanes, directives,
+ * and comments are preserved; the surgery itself is `replaceChordLine`.
  */
 function applyProgression(): void {
   const chords = progressionInput.value.split(/\s+/).filter(Boolean);
@@ -293,31 +336,64 @@ function applyProgression(): void {
   if (!riff) return;
 
   const chordLine = formatChordLine(chords, riff.beatsPerBar, riff.stepBeats);
-
-  const lines = text.value.split("\n");
-  const newLines: string[] = [];
-  let replaced = false;
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (
-      !replaced &&
-      trimmed &&
-      !trimmed.startsWith("#") &&
-      !trimmed.startsWith("//") &&
-      !/^\s*[eBGDAE]\s*\|/.test(line) &&
-      !/^(tempo|bpm|bar|step|grid|strum|release)\s+/i.test(trimmed)
-    ) {
-      newLines.push(chordLine);
-      replaced = true;
-    } else {
-      newLines.push(line);
-    }
-  }
-
-  text.value = newLines.join("\n");
+  const next = replaceChordLine(text.value, chordLine);
+  if (next === text.value) return;
+  pushUndo();
+  text.value = next;
   stop();
   refresh();
 }
+
+// ------------------------------------------------------------ builders ----
+
+/** Chord chips the user added by name, on top of the progression's own. */
+const addedChords: string[] = [];
+
+/**
+ * The draggable building blocks under the track: chord chips (the
+ * progression's chords, deduped, plus any added by name) and note chips (the
+ * 12 pitch classes, colored like every other note in the app). Dragging one
+ * onto the track adds an event; the track's drop zones do the geometry.
+ */
+function renderBuilders(): void {
+  const tokens = chordTokensFromText(text.value).filter((token) => token !== CHORD_REST);
+  const names = [...new Set([...tokens, ...addedChords])];
+  chordChips.replaceChildren(
+    ...names.map((name) => {
+      const chip = el("button", "builder-chip builder-chord", name) as HTMLButtonElement;
+      chip.type = "button";
+      chip.title = `Drag ${name} onto a bar in the track`;
+      makeDraggable<DragPayload>(chip, { kind: "new-chord", name });
+      return chip;
+    }),
+  );
+  noteChips.replaceChildren(
+    ...Array.from({ length: 12 }, (_, pc) => {
+      const chip = el("button", "builder-chip builder-note", noteLabels(pc)) as HTMLButtonElement;
+      chip.type = "button";
+      chip.style.background = colorFor(pc);
+      chip.title = `Drag a ${noteLabels(pc)} onto a string lane — the app picks the fret`;
+      makeDraggable<DragPayload>(chip, { kind: "new-note", pc });
+      return chip;
+    }),
+  );
+}
+
+chordAddInput.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  const name = chordAddInput.value.trim();
+  if (!name) return;
+  try {
+    const chord = parseChord(name);
+    if (!addedChords.includes(chord.name)) addedChords.push(chord.name);
+    chordAddInput.value = "";
+    chordAddInput.classList.remove("is-invalid");
+    renderBuilders();
+  } catch {
+    chordAddInput.classList.add("is-invalid");
+    chordAddInput.title = `"${name}" is not a chord the app understands`;
+  }
+});
 
 /**
  * Re-parse, re-render, and (re)start. Everything that can change the plan calls
@@ -573,6 +649,7 @@ function refresh(): Riff | null {
   plan = riff;
   syncTabEditor();
   syncProgressionInput();
+  renderBuilders();
 
   const bars = riff.totalBeats / riff.beatsPerBar;
   const noteCount = riff.events.reduce((sum, event) => sum + event.notes.length, 0);
@@ -615,11 +692,49 @@ function refresh(): Riff | null {
   });
   output.appendChild(reading);
 
-  // Unified track view: event blocks + per-string grid + playhead
+  // Unified track view: regions + lanes + playhead, draggable onto itself.
   const track = renderTrack(riff, {
     tuning: tuningNow,
     loop,
     onPlayEvent: (index) => playEvents([index]),
+    moves: {
+      // A chord drop writes through the progression input (the live view of
+      // the stream), which formats and replaces the chord line. Regions
+      // count chord EVENTS (rests are not events); the notation is
+      // positional in TOKENS — tokenIndexForChordOrdinal bridges them.
+      onMoveChord: (index, bar) => {
+        const ordinal = riff.events.slice(0, index + 1).filter((e) => e.kind === "chord").length - 1;
+        const tokens = chordTokensFromText(text.value);
+        const from = tokenIndexForChordOrdinal(tokens, ordinal);
+        if (from < 0 || from === bar) return;
+        progressionInput.value = moveChordToken(tokens, from, bar).join(" ");
+        applyProgression();
+      },
+      // A note drop edits the overlay lanes (same machinery as the tab
+      // editor's cells), which regenerates the lane text.
+      onMoveNote: (from, to) => {
+        const event = riff.events[from.eventIndex];
+        if (!event || event.kind !== "note") return;
+        const column = Math.round(event.beat / riff.stepBeats);
+        const lanes = buildOverlay(riff);
+        if (!moveLaneNote(lanes, { string: from.string, column }, to)) return;
+        updateTabLanes(lanes);
+      },
+      // A chord chip dropped on a bar: same write path as a chord move.
+      onAddChord: (bar, name) => {
+        const tokens = chordTokensFromText(text.value);
+        progressionInput.value = addChordToken(tokens, bar, name).join(" ");
+        applyProgression();
+      },
+      // A note chip dropped on a lane: the user thinks in pitch classes,
+      // the app answers in frets (fretForPitchClass, current tuning).
+      onAddNote: (pc, to) => {
+        const lanes = buildOverlay(riff);
+        const fret = fretForPitchClass(pc, tuningNow[to.string]);
+        if (!setLaneNote(lanes, to, fret)) return;
+        updateTabLanes(lanes);
+      },
+    },
   });
   trackEl.replaceChildren(track);
 
@@ -676,15 +791,15 @@ for (const input of [scaleInput, loopStartInput, loopEndInput]) {
   });
 }
 
-// Fingering tab switching
-const fingeringTabs = document.querySelectorAll<HTMLButtonElement>(".fingering-tab");
-const fingeringPanels = document.querySelectorAll<HTMLElement>(".fingering-panel");
-fingeringTabs.forEach((tab) => {
+// Tool tab switching (Chords / Tab / Text / Settings over one notation)
+const toolTabs = document.querySelectorAll<HTMLButtonElement>(".fingering-tab");
+const toolPanels = document.querySelectorAll<HTMLElement>(".fingering-panel");
+toolTabs.forEach((tab) => {
   tab.addEventListener("click", () => {
-    fingeringTabs.forEach((t) => t.classList.remove("is-active"));
-    fingeringPanels.forEach((p) => { p.hidden = true; });
+    toolTabs.forEach((t) => t.classList.remove("is-active"));
+    toolPanels.forEach((p) => { p.hidden = true; });
     tab.classList.add("is-active");
-    const panel = document.querySelector<HTMLElement>(`.fingering-panel[data-panel="${tab.dataset.tab}"]`);
+    const panel = document.querySelector<HTMLElement>(`.fingering-panel[data-tool-panel="${tab.dataset.tool}"]`);
     if (panel) panel.hidden = false;
   });
 });

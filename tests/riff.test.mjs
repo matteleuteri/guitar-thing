@@ -207,3 +207,34 @@ test("a multi-note event never puts two notes on one string", () => {
 test("an empty box is refused with an example, not a stack trace", () => {
   assert.throws(() => parse(""), (err) => /nothing to play/i.test(err.message) && /\|/.test(err.message));
 });
+
+// --- rest bars (`-` in the chord stream) ---
+
+test("a rest bar holds its position: no chord event, later chords keep their bars", () => {
+  // What a chord drag writes: C was dragged off bar 1 onto F's bar.
+  const riff = parse("tempo 96\nbar 4\n- Am C G");
+  const chords = riff.events.filter((e) => e.kind === "chord");
+  assert.deepEqual(
+    chords.map((e) => [e.label, e.beat]),
+    [["Am", 4], ["C", 8], ["G", 12]],
+    "bar 1 is empty, and Am/C/G still sit on bars 2/3/4",
+  );
+});
+
+test("a trailing rest extends nothing (totalBeats is event-driven)", () => {
+  const riff = parse("tempo 96\nbar 4\nC Am F -");
+  assert.equal(riff.totalBeats, 12, "silence past the last event is not rendered");
+});
+
+test("a stream of only rests is refused like an empty box", () => {
+  assert.throws(() => parse("tempo 96\n- - -"), /nothing to play/i);
+});
+
+test("a rest bar still counts as a bar beside the tab lanes", () => {
+  // A rest in the middle of the stream with lanes present: the union keeps
+  // the tab notes at their own beats, and the chords at theirs.
+  const riff = parse("tempo 96\nbar 4\nstep eighths\nC - F G\ne|5---7---|");
+  const chords = riff.events.filter((e) => e.kind === "chord");
+  assert.deepEqual(chords.map((e) => e.beat), [0, 8, 12]);
+  assert.equal(riff.totalBeats, 16);
+});

@@ -56,6 +56,16 @@ export function barMarkFraction(bar: number, beatsPerBar: number, totalBeats: nu
   return trackFraction(bar * beatsPerBar, totalBeats, leadInBeats);
 }
 
+/**
+ * Inverse of trackFraction: which beat sits at a fraction of the track, for
+ * turning a mouse x into a drop target. NOT clamped — a cursor past either
+ * end reports a beat outside the piece, which the caller clamps to its own
+ * valid range (it knows the range; this function does not).
+ */
+export function beatAtFraction(fraction: number, totalBeats: number, leadInBeats = 0): number {
+  return fraction * (totalBeats + leadInBeats) - leadInBeats;
+}
+
 /** Fractional share of one step column, for tests and for the gridline period. */
 export function gridlinePeriodFraction(stepBeats: number, totalBeats: number): number {
   const cols = stepColumns(totalBeats, stepBeats);

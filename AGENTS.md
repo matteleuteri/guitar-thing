@@ -80,8 +80,8 @@ finger-number/learning aids.
   whatever chord line is in the notation, so it is a live view of the chord
   stream (not just a one-way write).
 
-**In flight (uncommitted, Oct 1 2026) — the track view, now DAW-style
-regions.** The riff page's top section is ONE track (`src/track.ts`,
+**Landed on `main` Oct 2 2026 (commit `1374888`) — the track view, now
+DAW-style regions.** The riff page's top section is ONE track (`src/track.ts`,
 `renderTrack`): a bar ruler, one chord lane (chord name + auto-voiced
 shape), six string lanes (tab notes, with sticky lane letters and step
 gridlines), and the loop region + playhead overlaid — every horizontal
@@ -128,7 +128,7 @@ Play, not on wraps — a 17-beat loop would drift the bar lines against the
 metronome. The geometry functions take `leadInBeats` (default 0), so the
 same-beat-same-pixel invariant is untouched, just shifted.
 
-Status: `npm test` green (64); **NOT yet verified in a browser.** Remaining
+Status: `npm test` green; verified in a browser by the user. Remaining
 known issues:
 
 - Dead code left behind: `renderRiffTimeline` + `setRiffPlayhead` in
@@ -136,13 +136,44 @@ known issues:
   ever `null`), and `scripts/smoke.mjs` still asserts the old timeline's
   source shape — it currently guards a renderer the app does not use.
   `stepName()` lost its only UI caller; the function and its tests remain.
-- `riff.html` has TWO `#tab-editor` divs (one in Notation, one in the
-  Fingering → Tab panel). `getElementById` mounts the editor into the
-  FIRST, so the Tab panel is permanently empty. The chord panel's intro
-  paragraph is also duplicated verbatim.
+- ~~`riff.html` had TWO `#tab-editor` divs~~ — fixed when the page became
+  tool tabs (Chords/Tab/Text/Settings, Oct 2 2026): one `#tab-editor` now.
+  The chord panel's duplicated intro paragraph is deduped too.
 
-Drag-and-drop (see Backlog) is Phase 2; regions are the natural draggable
-unit. It waits on this being seen in a browser and committed.
+**Phase 2 — drag-and-drop editing (landed, Oct 2 2026, `1374888`).** The track is no longer read-only: chord regions drag to a new
+bar (**replace** — the user's call over swap: the target bar's chord dies,
+the source bar becomes a rest), and note regions drag to a new (string,
+column) (**fret-preserving** — the user's call over pitch-preserving: a
+literal tab gesture, the digit travels and the pitch follows). Every drop
+rewrites the NOTATION TEXT (it stays the single source of truth) via the
+pure translators in `src/track-edit.ts` and the existing
+applyProgression / updateTabLanes machinery, then re-renders. The drag
+itself is `src/dnd.ts`, ~80 lines over the native HTML5 API — its reason
+to exist: `dataTransfer` is unreadable during `dragover`, so a module-level
+session carries the payload to the zones. The drop indicator positions with
+the same timeline geometry as the regions, so the slot it shows is the slot
+the drop writes. **New notation: `-` in the chord stream is a rest bar**
+(no chord event, bar preserved) — replace semantics needs it, because a
+positional stream cannot otherwise leave an empty bar. A TRAILING rest
+extends nothing (`totalBeats` is event-driven). Pins survive rests: they
+are index-aligned with chord EVENTS and rests are not chords. Tests:
+`tests/track-edit.test.mjs` (translators, incl. the 2-digit-fret shadow
+rule), rest bars in `tests/riff.test.mjs`, `beatAtFraction` round-trip in
+`tests/timeline.test.mjs`. A **builder palette** (chord chips + 12 note
+chips, draggable onto the track) and an **Undo button** (stack over the
+notation, capped at 50 — native textarea undo dies when script sets
+`.value`) landed in the same slice; region resize (the model has no
+explicit durations) and delete-by-drag-off did not. Verified in a browser
+by the user.
+
+**Tool tabs (Oct 2 2026, same commit).** The riff page is no longer one
+long scroll: the track + transport stay on top, and everything else lives
+under a Chords / Tab / Text / Settings tab strip — each tool an editor
+over the same notation string. Watch two gotchas that this exposed:
+`.fingering-panel { display: flex }` used to BEAT the `hidden` attribute,
+so every panel showed at once (now `[hidden] { display: none !important }`
+in style.css, guarded by smoke), and the page briefly carried TWO
+`#tab-editor` divs (only the first mounted).
 
 **Audio baseline (unchanged, on `main`):** all approved audio work is merged
 into `main` (and pushed to `origin/main`): the physical string core (commuted
@@ -257,6 +288,17 @@ from the local `dist/` (that folder is gitignored). CI owns it:
   used.
 - Live site updates a minute or two after a push. `gh run watch` on the latest
   run, or the Actions tab, shows progress/failures.
+- **Pages serves `Cache-Control: max-age=600` with ETags, and the app ships
+  UNBUNDLED ESM** — every module file has its own 10-minute freshness timer,
+  so for up to ~10 minutes after a deploy a browser can mix a fresh
+  `track.js` with a stale `timeline.js` from the previous deploy and die on
+  an import mismatch (`... does not provide an export named ...`). It has hit
+  the user twice (the second time on the `b892b39` deploy). The fix is a hard
+  refresh (Ctrl+Shift+R); it also self-heals within 10 minutes. Pages cannot
+  set custom headers, and versioned asset URLs would not help (the HTML
+  itself sits inside the same 10-minute window), so "hard refresh after each
+  deploy" is the standing cost — say so whenever you hand a deploy over to
+  be checked.
 - Local development is fully independent: edit → `npm run build` → `node
   server.mjs` → `localhost:5173`. Committing without pushing never affects the
   live site.
@@ -356,7 +398,12 @@ through to the chord stream and dying as `Unknown chord "e"`.
 Chord voicings reuse `planGuitarSong`'s DP so the hand moves as little as
 possible; tab events are the explicit-string escape hatch. Note names are
 resolved to *frequencies* via `tuning[stringIndex] + fret`; there is no raw
-Hz/MIDI input yet.
+Hz/MIDI input yet. A `-` token in the chord line is a **rest bar** (no chord
+event, bar preserved — positions are token indices); it exists so a chord
+dragged off its bar leaves an empty bar instead of shifting every chord
+after it. A trailing rest extends nothing (`totalBeats` is event-driven), a
+rest-only stream is refused like an empty box, and pins are aligned with
+chord EVENTS so a rest never shifts them.
 
 **The bar ruler is the shared axis (`renderRiffGrid`), and it is aligned in
 CHARACTERS.** It sits directly above the textarea and marks each bar at
@@ -603,8 +650,16 @@ that fills, and assert the note COUNT: a probe that skips missing notes reports
   track shows (and the transport plays) before the music starts.
   Unit-tested in `tests/timeline.test.mjs`.
 - `src/track.ts` — `renderTrack` + `setTrackPlayhead`: the unified track view
-  (bar ruler + loop region + event blocks + per-string chips + one playhead
-  on a single canvas). In flight — see "In flight" at the top.
+  (bar ruler + chord lane + string lanes + loop + playhead on one canvas,
+  DAW-style regions). In flight — see "In flight" at the top.
+- `src/track-edit.ts` — pure drag-and-drop edit translators
+  (`chordTokensFromText`, `moveChordToken`, `tokenIndexForChordOrdinal`,
+  `moveLaneNote`): a drop on the track translates to a notation-text edit
+  here, then the usual machinery re-renders. Unit-tested in
+  `tests/track-edit.test.mjs`.
+- `src/dnd.ts` — the app's only drag-and-drop machinery: a thin wrapper over
+  the native HTML5 API with a module-level drag session (`dataTransfer` is
+  unreadable during `dragover`).
 - `src/main.ts` — UI wiring, form handling, guitar/piano orchestration (the
   finder's entry point; no riff code).
 - `src/riff-main.ts` — the riff builder's wiring: notation editor, voicing
@@ -998,12 +1053,9 @@ Both `dev-audio` and `song-mode` remain as offline history only.
 
 ## Backlog / ideas (discuss with the user before building)
 
-- **Track drag-and-drop** (Phase 2 of the track feature — Phase 1, the track
-  view itself, is IN FLIGHT and uncommitted; see "In flight" at the top): the
-  track view is read-only. Next step is a palette of draggable items (chords,
-  notes) that can be dropped onto the track. Decision: build a thin `dnd.ts`
-  helper (~50 lines wrapping the native HTML5 drag-and-drop API) rather than
-  pulling in a framework or library. The app stays dependency-free.
+- **Track drag-and-drop** — Phase 2 (moves) + builder palette + undo are
+  LANDDED (`1374888`). Remaining: region resize (needs explicit durations
+  in the model first) and delete-by-drag-off.
 - **The sliced-kit pivot (IN FLIGHT — phase A landed, uncommitted).** See
   "progress 23" at the bottom of this file for the full write-up. In one line:
   the shipped smplr kits decode **all 88 notes (A0..C8, 2.6 MB) on every page

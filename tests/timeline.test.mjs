@@ -13,6 +13,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   barMarkFraction,
+  beatAtFraction,
   gridlinePeriodFraction,
   noteLeftPercent,
   stepColumns,
@@ -87,6 +88,24 @@ test("a lead-in puts empty beats before beat 0, and everything shifts together",
   assert.equal(barMarkFraction(3, 4, total, lead), trackFraction(12, total, lead));
   // No lead-in by default: beat 0 is the left edge, exactly as before.
   assert.equal(trackFraction(0, total), 0);
+});
+
+test("beatAtFraction inverts trackFraction, lead-in included", () => {
+  // The drop target reads the mouse back through the same geometry, so a
+  // region at beat B is under the cursor at fraction trackFraction(B).
+  for (const lead of [0, 1]) {
+    for (let beat = -lead; beat <= 16; beat += 0.25) {
+      const fraction = trackFraction(beat, 16, lead);
+      assert.ok(
+        Math.abs(beatAtFraction(fraction, 16, lead) - beat) < 1e-9,
+        `round-trip failed at beat ${beat} with lead-in ${lead}`,
+      );
+    }
+  }
+  // Outside the track it reports beats outside the piece — clamping is the
+  // caller's job (it knows the valid range).
+  assert.ok(beatAtFraction(1.2, 16, 1) > 16);
+  assert.ok(beatAtFraction(-0.2, 16, 1) < -1);
 });
 
 test("position increases monotonically with the beat", () => {

@@ -321,7 +321,7 @@ export function parseRiff(text: string, options: RiffOptions): Riff {
     );
   }
   const columns = widths.size === 1 ? [...widths][0] : 0;
-  if (columns === 0 && chordTokens.length === 0) {
+  if (columns === 0 && chordTokens.every((token) => token === "-")) {
     throw new Error("Nothing to play: add a chord (C Am F G) or a tab lane (e|--5--5--|).");
   }
 
@@ -339,13 +339,27 @@ export function parseRiff(text: string, options: RiffOptions): Riff {
 
   // ---- chord stream: one chord per bar, voiced by the song DP ----
   if (chordTokens.length > 0) {
-    const parsed: ParsedChord[] = chordTokens.map((token) => {
+    // A `-` token is a REST BAR: no chord event, but the bar still exists, so
+    // later chords keep their positions. (It exists so a chord can be dragged
+    // off its bar on the track: the stream is positional — a chord's bar is
+    // its token index — so replacing a chord without a rest token would
+    // silently shift every chord between the two bars.) A TRAILING rest
+    // extends nothing: totalBeats is event-driven, so silence past the last
+    // event is not rendered. Pins stay aligned with chord EVENTS (rests are
+    // not chords), so inserting a rest before a pinned chord does not shift
+    // the pin.
+    const parsed: ParsedChord[] = [];
+    const barOfChord: number[] = [];
+    chordTokens.forEach((token, bar) => {
+      if (token === "-") return;
       try {
-        return parseChord(token);
+        parsed.push(parseChord(token));
+        barOfChord.push(bar);
       } catch (e) {
         throw new Error(`Chord "${token}": ${e instanceof Error ? e.message : String(e)}`);
       }
     });
+    if (parsed.length > 0) {
     const pins = options.pins ?? [];
     const plan = planGuitarSong(parsed, options.tuning, options.maxFrets, options.span, options.cap, pins);
     if (!plan || plan.kind !== "guitar") {
@@ -359,7 +373,7 @@ export function parseRiff(text: string, options: RiffOptions): Riff {
         else notes.push({ stringIndex, fret });
       });
       pushEvent({
-        beat: index * beatsPerBar,
+        beat: barOfChord[index] * beatsPerBar,
         beats: beatsPerBar,
         strumMs: notes.length > 1 ? strumMs : 0,
         notes,
@@ -370,6 +384,7 @@ export function parseRiff(text: string, options: RiffOptions): Riff {
         pinned: pins[index]?.name === entry.chord.name,
       });
     });
+    }
   }
 
   // ---- tab lanes: one event per column that has any note ----

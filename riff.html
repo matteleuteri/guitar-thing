@@ -46,44 +46,85 @@
             <span class="riff-transport">
               <button id="riff-play" type="button">Play ▶</button>
               <button id="riff-stop" type="button">Stop</button>
+              <button id="riff-undo" type="button" disabled title="Undo the last drag-and-drop or builder-chip edit">Undo</button>
             </span>
           </div>
         </div>
+        <p class="muted riff-drag-hint">
+          Drag a chord region to another bar (its old bar becomes a <code>-</code> rest), or a note region to
+          another string or column — the notation rewrites itself.
+        </p>
         <div id="riff-output"></div>
       </section>
 
-      <section id="notation">
-        <h2>Notation</h2>
-        <div class="field">
-          <label for="riff-progression">Chord progression</label>
-          <input id="riff-progression" type="text" value="C Am F G" spellcheck="false" title="One chord per bar, separated by spaces. Auto-aligns each chord to its bar mark on the ruler." />
+      <section id="tools">
+        <h2>Tools</h2>
+        <div class="fingering-tabs">
+          <button class="fingering-tab is-active" data-tool="chords" type="button">Chords</button>
+          <button class="fingering-tab" data-tool="tab" type="button">Tab</button>
+          <button class="fingering-tab" data-tool="text" type="button">Text</button>
+          <button class="fingering-tab" data-tool="settings" type="button">Settings</button>
         </div>
-        <div class="field field-wide">
-          <div class="riff-box">
-            <div class="riff-grid" id="riff-grid" aria-hidden="true"></div>
-            <textarea
-              id="riff-text"
-              rows="9"
+        <div class="fingering-panel" data-tool-panel="chords">
+          <p class="muted">
+            Every chord in the stream, in order. Pick one, then step through its voicings — the list is ordered by how
+            little your hand moves from the chord before it, so the first few are the smoothest. <strong>Auto</strong>
+            hands the chord back to the search; a stepped choice is <em>pinned</em>, and the chords after it re-optimize
+            around it. <span id="voicing-summary" class="muted"></span>
+          </p>
+          <div class="field">
+            <label for="riff-progression">Chord progression</label>
+            <input id="riff-progression" type="text" value="C Am F G" spellcheck="false" title="One chord per bar, separated by spaces. Auto-aligns each chord to its bar mark on the ruler." />
+          </div>
+          <div class="builder-row">
+            <span class="builder-label">Chords</span>
+            <div id="chord-chips" class="builder-chips"></div>
+            <input
+              id="chord-add"
+              type="text"
+              placeholder="+ chord (e.g. Dm7)"
               spellcheck="false"
-              title="Chord stream and/or tab lanes. Directives: tempo|bpm, bar, step|grid, strum, release — see 'How to write this' below."
-            >tempo 96
+              title="Type a chord name and press Enter to add it as a draggable chip"
+            />
+          </div>
+          <div id="voicing-tabs" class="voicing-tabs"></div>
+          <div id="voicing-picker" class="voicing-picker"></div>
+        </div>
+        <div class="fingering-panel" data-tool-panel="tab" hidden>
+          <div class="builder-row">
+            <span class="builder-label">Notes</span>
+            <div id="note-chips" class="builder-chips"></div>
+          </div>
+          <div id="tab-editor" class="tab-editor"></div>
+        </div>
+        <div class="fingering-panel" data-tool-panel="text" hidden>
+          <div class="field field-wide">
+            <div class="riff-box">
+              <div class="riff-grid" id="riff-grid" aria-hidden="true"></div>
+              <textarea
+                id="riff-text"
+                rows="9"
+                spellcheck="false"
+                title="Chord stream and/or tab lanes. Directives: tempo|bpm, bar, step|grid, strum, release — see 'How to write this' below."
+              >tempo 96
 strum 55
   C       Am      F       G
 e|5---5---7---7---8---8---7---5---|
 B|----------------3---5---5---3---|
 G|--------------------------------|</textarea
-            >
+              >
+            </div>
           </div>
-        </div>
-        <p id="riff-error" class="error" hidden></p>
-        <div id="tab-editor" class="tab-editor"></div>
+          <p id="riff-error" class="error" hidden></p>
         <details class="riff-legend">
           <summary>How to write this — syntax, the bar ruler, and what plays</summary>
           <div class="riff-legend-body">
             <ul>
               <li>
                 A <strong>chord line</strong> is one chord per bar, read left to right. Spaces or <code>|</code> both
-                work, and the spacing is yours to choose — see the bar ruler below.
+                work, and the spacing is yours to choose — see the bar ruler below. A <code>-</code> as a chord is
+                a <strong>rest bar</strong>: no chord that bar, but the bar is kept (that's what a chord dragged
+                off its bar leaves behind).
               </li>
               <li>
                 A <strong>tab lane</strong> is <code>LANE|</code> plus the notes, one per character column:
@@ -125,25 +166,12 @@ G|--------------------------------|</textarea
             </ul>
             <p class="muted">
               A chord name is pitch classes only — <code>C</code> does not carry frets, so the app searches for a shape.
-              Use <strong>Chord voicings</strong> below to step through what it found and pin the one you want.
+              Use the <strong>Chords</strong> tab to step through what it found and pin the one you want.
             </p>
           </div>
         </details>
-      </section>
-
-      <section id="fingering">
-        <h2>Fingering</h2>
-        <div class="fingering-tabs">
-          <button class="fingering-tab is-active" data-tab="chord" type="button">Chord</button>
-          <button class="fingering-tab" data-tab="tab" type="button">Tab</button>
         </div>
-        <div class="fingering-panel" data-panel="chord">
-          <p class="muted">
-            Every chord in the stream, in order. Pick one, then step through its voicings — the list is ordered by how
-            little your hand moves from the chord before it, so the first few are the smoothest. <strong>Auto</strong>
-            hands the chord back to the search; a stepped choice is <em>pinned</em>, and the chords after it re-optimize
-            around it. <span id="voicing-summary" class="muted"></span>
-          </p>
+        <div class="fingering-panel" data-tool-panel="settings" hidden>
           <div class="field-row">
             <div class="field">
               <label for="tuning">Tuning</label>
@@ -176,17 +204,6 @@ G|--------------------------------|</textarea
               <input value="E2" /><input value="A2" /><input value="D3" /><input value="G3" /><input value="B3" /><input value="E4" />
             </div>
           </details>
-          <p class="muted">
-            Every chord in the stream, in order. Pick one, then step through its voicings — the list is ordered by how
-            little your hand moves from the chord before it, so the first few are the smoothest. <strong>Auto</strong>
-            hands the chord back to the search; a stepped choice is <em>pinned</em>, and the chords after it re-optimize
-            around it.
-          </p>
-          <div id="voicing-tabs" class="voicing-tabs"></div>
-          <div id="voicing-picker" class="voicing-picker"></div>
-        </div>
-        <div class="fingering-panel" data-panel="tab" hidden>
-          <div id="tab-editor" class="tab-editor"></div>
         </div>
       </section>
 

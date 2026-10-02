@@ -253,6 +253,11 @@ header p { color: var(--muted); max-width: 70ch; margin-top: .25rem; }
   flex-direction: column;
   gap: .75rem;
 }
+/* A `hidden` panel must actually hide: a display rule (like the one above)
+   otherwise overrides the hidden attribute's UA style, so every panel shows. */
+[hidden] {
+  display: none !important;
+}
 
 /* ------------------------------------------------------------------ */
 /* Track view                                                          */
@@ -371,6 +376,90 @@ header p { color: var(--muted); max-width: 70ch; margin-top: .25rem; }
 }
 .track-clickable { cursor: pointer; }
 .track-clickable:hover { filter: brightness(1.3); }
+/* Drag-and-drop: movable regions carry a grip strip (the "component" the
+   user looks for), the dragged region ghosts, the valid drop lanes light up
+   for the whole drag (track.ts toggles the canvas classes on dragstart/
+   dragend), and the drop indicator is a dashed line marking the exact
+   landing slot (dashed so it never reads as the solid playhead). */
+.track-movable { cursor: grab; }
+.track-movable::before {
+  content: "";
+  flex: 0 0 4px;
+  align-self: stretch;
+  background-image: radial-gradient(circle, currentColor 1px, transparent 1.2px);
+  background-size: 4px 4px;
+  background-position: center;
+  opacity: .35;
+}
+.track-movable:hover::before { opacity: .7; }
+.track-region.is-dragging { opacity: .35; }
+.track-canvas.track-drag-note .track-lane:not(.track-chord-lane),
+.track-canvas.track-drag-chord .track-chord-lane {
+  background-color: rgba(76, 194, 255, .06);
+  outline: 1px dashed rgba(76, 194, 255, .35);
+  outline-offset: -1px;
+}
+.track-drop {
+  position: absolute;
+  width: 0;
+  border-left: 2px dashed var(--accent);
+  z-index: 3;
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Builders: draggable chord + note chips under the track               */
+/* ------------------------------------------------------------------ */
+
+.builders {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  margin-top: .6rem;
+}
+.builder-row {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+.builder-label {
+  flex: 0 0 3.5rem;
+  font-size: .72rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+.builder-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .3rem;
+}
+.builder-chip {
+  cursor: grab;
+  border: 1px solid rgba(255, 255, 255, .16);
+  border-radius: 4px;
+  padding: .22rem .55rem;
+  font-size: .85rem;
+  background: var(--panel);
+  color: inherit;
+}
+.builder-chip.builder-note {
+  color: #06121c;
+  font-weight: 600;
+  font-family: ui-monospace, monospace;
+  font-size: .72rem;
+  border: none;
+}
+.builder-chip:hover { filter: brightness(1.25); }
+.builder-chip.is-dragging { opacity: .35; }
+#chord-add {
+  width: 9.5rem;
+  font-size: .8rem;
+}
+#chord-add.is-invalid {
+  border-color: var(--error);
+  outline: none;
+}
 .track-loop {
   --loop-tint: rgba(76, 194, 255, .07);
   position: absolute;

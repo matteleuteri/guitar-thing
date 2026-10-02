@@ -626,6 +626,37 @@ throws(() => parseRiff("# only a comment", riffOpts), "empty riff throws");
     /cp index\.html riff\.html style\.css _site\//.test(workflow),
     "the Pages workflow copies riff.html (otherwise the live riff builder 404s)",
   );
+
+  // ---- The tool tab strip (Chords / Tab / Text / Settings). ----
+  // Pure DOM wiring, invisible to the Node tests, so assert its shape here.
+  {
+    const styleCss = await readFile(new URL("../style.css", import.meta.url), "utf8");
+    const riffMain = await readFile(new URL("../dist/riff-main.js", import.meta.url), "utf8");
+    const tabs = [...riffPage.matchAll(/data-tool="(\w+)"/g)].map((m) => m[1]);
+    const panels = [...riffPage.matchAll(/data-tool-panel="(\w+)"/g)].map((m) => m[1]);
+    check(tabs.length === 4, `riff.html has four tool tabs (${tabs.join(", ")})`);
+    check(
+      JSON.stringify([...tabs].sort()) === JSON.stringify([...panels].sort()),
+      `every tool tab has exactly one panel (tabs: ${tabs}; panels: ${panels})`,
+    );
+    const activeTabs = (riffPage.match(/fingering-tab is-active/g) ?? []).length;
+    const hiddenPanels = (riffPage.match(/data-tool-panel="\w+" hidden/g) ?? []).length;
+    check(activeTabs === 1, "exactly one tool tab starts active");
+    check(hiddenPanels === tabs.length - 1, "every panel but the first starts hidden");
+    // A flex `display` rule beats the hidden attribute's UA style, so the
+    // panels all showed at once until the stylesheet started forcing it.
+    check(
+      /\[hidden\]\s*\{[^}]*display:\s*none/.test(styleCss),
+      "style.css forces [hidden] to display:none (otherwise panels never hide)",
+    );
+    check(
+      /data-tool-panel/.test(riffMain) && /dataset\.tool/.test(riffMain),
+      "riff-main.ts wires tabs to panels via data-tool",
+    );
+    // The visual tab editor must exist exactly once (it used to live in two
+    // panels at the same id, so the Tab panel was always empty).
+    check((riffPage.match(/id="tab-editor"/g) ?? []).length === 1, "one #tab-editor in riff.html");
+  }
   if (shipped) {
     const text = shipped[1].replace(/^\s*\n/, "").replace(/\s+$/, "");
     try {

@@ -88,7 +88,9 @@ audition single events. The track
 re-plans as you type, and **Play ▶** always plays what is in the box.
 Playback opens with a one-beat pause — the playhead sweeps the empty first
 beat (a click, if the metronome is on) so you can settle before the first
-note lands.
+note lands. Regions also **drag**: pull a chord onto another bar (the bar
+it left becomes a `-` rest — see below) or a note onto another string or
+column, and the notation rewrites itself.
 
 **Walking a chord through its voicings** is the reason it is its own page. A
 chord name is pitch classes only — `C` carries no frets — so the app *searches*
@@ -122,6 +124,11 @@ e|5---5---7---7---8---8---7---5---|
 B|----------------3---5---5---3---|
 G|--------------------------------|
 ```
+
+A `-` in place of a chord is a **rest bar**: no chord that bar, but the bar
+is kept, so the chords after it stay on their own bars (dragging a chord
+off its bar leaves one behind). A rest at the very end doesn't extend the
+piece.
 
 A chord line and a tab lane can appear in the same document, and they **play
 together**: a chord and a tab note on the same beat are one moment, the note

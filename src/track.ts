@@ -1,6 +1,7 @@
 import { el, colorFor } from "./render.js";
 import { chordShape } from "./fretboard.js";
-import { LEAD_IN_BEATS, barMarkFraction, noteLeftPercent, stepColumns, trackFraction } from "./timeline.js";
+import { LEAD_IN_BEATS, barMarkFraction, beatAtFraction, noteLeftPercent, stepColumns, trackFraction } from "./timeline.js";
+import { makeDraggable, makeDropZone, onDragEnd, onDragStart, resetDragSession } from "./dnd.js";
 import type { Riff, RiffEvent } from "./riff.js";
 
 /**
@@ -23,11 +24,31 @@ import type { Riff, RiffEvent } from "./riff.js";
 
 const STRING_LETTERS = "eBGDAE";
 
+/** Drag-and-drop edits the track offers when these are provided. */
+export interface TrackMoves {
+  /** A chord region was dropped on bar `bar` (0-based). Replace semantics. */
+  onMoveChord?: (eventIndex: number, bar: number) => void;
+  /** A note region was dropped on (string, column). Fret-preserving. */
+  onMoveNote?: (from: { eventIndex: number; string: number }, to: { string: number; column: number }) => void;
+  /** A chord builder chip was dropped on bar `bar` (0-based). */
+  onAddChord?: (bar: number, name: string) => void;
+  /** A note builder chip (a pitch class) was dropped on (string, column). */
+  onAddNote?: (pc: number, to: { string: number; column: number }) => void;
+}
+
 export interface TrackOptions {
   tuning: number[];
   onPlayEvent?: (index: number) => void;
   loop?: { start: number; end: number } | null;
+  moves?: TrackMoves;
 }
+
+/** What a dragged thing carries to the drop zones: a region, or a builder chip. */
+export type DragPayload =
+  | { kind: "chord"; eventIndex: number }
+  | { kind: "note"; eventIndex: number; string: number }
+  | { kind: "new-chord"; name: string }
+  | { kind: "new-note"; pc: number };
 
 /**
  * Where each event's region ENDS, in music beats (index-aligned with
@@ -88,6 +109,80 @@ export function renderTrack(
     canvas.appendChild(lane);
   }
 
+  // Drag-and-drop. One dashed indicator, moved between lanes during a drag;
+  // it positions with the SAME geometry as the regions, so the landing slot
+  // it shows is the slot the drop writes. The registry is reset per render
+  // (the old canvas's cleanups would otherwise accumulate across refreshes).
+  resetDragSession();
+  // Light up the valid drop lanes for the whole drag. The callback fires for
+  // region drags AND builder-chip drags (chips live outside the canvas, so a
+  // bubbling listener here could never see them start).
+  onDragStart<DragPayload>((payload) => {
+    canvas.classList.toggle("track-drag-chord", payload.kind === "chord" || payload.kind === "new-chord");
+    canvas.classList.toggle("track-drag-note", payload.kind === "note" || payload.kind === "new-note");
+  });
+  onDragEnd(() => {
+    canvas.classList.remove("track-drag-chord", "track-drag-note");
+  });
+  const indicator = el("div", "track-drop");
+  indicator.hidden = true;
+  canvas.appendChild(indicator);
+  const hideIndicator = () => {
+    indicator.hidden = true;
+  };
+  const showIndicator = (lane: HTMLElement, leftPercent: number) => {
+    indicator.style.top = `${lane.offsetTop}px`;
+    indicator.style.height = `${lane.offsetHeight}px`;
+    indicator.style.left = `${leftPercent}%`;
+    indicator.hidden = false;
+  };
+  const fractionAtX = (x: number): number => {
+    const rect = canvas.getBoundingClientRect();
+    return Math.min(1, Math.max(0, (x - rect.left) / rect.width));
+  };
+  const barAtX = (x: number): number => {
+    const beat = beatAtFraction(fractionAtX(x), riff.totalBeats, LEAD_IN_BEATS);
+    const bars = Math.max(1, Math.ceil(riff.totalBeats / riff.beatsPerBar));
+    return Math.min(bars - 1, Math.max(0, Math.floor(beat / riff.beatsPerBar)));
+  };
+  const columnAtX = (x: number): number => {
+    const beat = beatAtFraction(fractionAtX(x), riff.totalBeats, LEAD_IN_BEATS);
+    const musicCols = stepColumns(riff.totalBeats, riff.stepBeats);
+    return Math.min(musicCols - 1, Math.max(0, Math.round(beat / riff.stepBeats)));
+  };
+  if (options.moves?.onMoveChord || options.moves?.onAddChord) {
+    makeDropZone<DragPayload>(chordLane, {
+      over: (x, _y, payload) => {
+        if (payload.kind !== "chord" && payload.kind !== "new-chord") return false;
+        showIndicator(chordLane, noteLeftPercent(barAtX(x) * riff.beatsPerBar, riff.totalBeats, LEAD_IN_BEATS));
+        return true;
+      },
+      drop: (x, _y, payload) => {
+        const bar = barAtX(x);
+        if (payload.kind === "chord") options.moves!.onMoveChord!(payload.eventIndex, bar);
+        if (payload.kind === "new-chord") options.moves!.onAddChord!(bar, payload.name);
+      },
+      end: hideIndicator,
+    });
+  }
+  if (options.moves?.onMoveNote || options.moves?.onAddNote) {
+    lanes.forEach((lane, stringIndex) => {
+      makeDropZone<DragPayload>(lane, {
+        over: (x, _y, payload) => {
+          if (payload.kind !== "note" && payload.kind !== "new-note") return false;
+          showIndicator(lane, noteLeftPercent(columnAtX(x) * riff.stepBeats, riff.totalBeats, LEAD_IN_BEATS));
+          return true;
+        },
+        drop: (x, _y, payload) => {
+          const to = { string: stringIndex, column: columnAtX(x) };
+          if (payload.kind === "note") options.moves!.onMoveNote!({ eventIndex: payload.eventIndex, string: payload.string }, to);
+          if (payload.kind === "new-note") options.moves!.onAddNote!(payload.pc, to);
+        },
+        end: hideIndicator,
+      });
+    });
+  }
+
   // Regions. Left edge = the event's beat, width = its span, both as
   // percentages of the canvas with the lead-in — like every other position.
   const ends = regionEnds(riff.events, riff.totalBeats);
@@ -96,7 +191,7 @@ export function renderTrack(
     const bar = Math.floor(event.beat / riff.beatsPerBar) + 1;
     const beat = (event.beat % riff.beatsPerBar) + 1;
     const title = `${event.label} — bar ${bar}, beat ${beat}`;
-    const wire = (region: HTMLElement) => {
+    const wire = (region: HTMLElement, payload: DragPayload) => {
       region.style.left = `${leftPct(event.beat)}%`;
       region.style.width = `${leftPct(ends[index]) - leftPct(event.beat)}%`;
       region.dataset.index = String(index);
@@ -108,19 +203,24 @@ export function renderTrack(
           options.onPlayEvent!(index);
         });
       }
+      const movable = payload.kind === "chord" ? options.moves?.onMoveChord : options.moves?.onMoveNote;
+      if (movable) {
+        region.classList.add("track-movable");
+        makeDraggable<DragPayload>(region, payload);
+      }
     };
     if (event.kind === "chord") {
       const region = el("div", "track-region track-chord-region");
       region.appendChild(el("span", "track-region-name", event.label));
       region.appendChild(el("span", "track-region-shape", chordShape(event.frets)));
-      wire(region);
+      wire(region, { kind: "chord", eventIndex: index });
       chordLane.appendChild(region);
     } else {
       for (const note of event.notes) {
         const region = el("div", "track-region track-note-region");
         region.style.background = colorFor((tuning[note.stringIndex] + note.fret) % 12);
         region.appendChild(el("span", "track-region-fret", String(note.fret)));
-        wire(region);
+        wire(region, { kind: "note", eventIndex: index, string: note.stringIndex });
         // A note lands on its own string's lane; an out-of-range index falls
         // back to the top lane so the region stays visible.
         (lanes[note.stringIndex] ?? lanes[lanes.length - 1]).appendChild(region);
