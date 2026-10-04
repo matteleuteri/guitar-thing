@@ -57,10 +57,11 @@ finger-number/learning aids.
 - **Metronome + count-in** for riff mode: `TransportOptions` (`metronome`,
   `countInBars`) on the transport, `playClick(when, isDownbeat)` in `audio.ts`
   (gain 0.08), Metronome checkbox + Count-in (bars) inputs on the riff page.
-- **Visual tab editor** (`src/tab-editor.ts`): a clickable grid (one row per
+- ~~**Visual tab editor** (`src/tab-editor.ts`)~~: a clickable grid (one row per
   string, one column per step) replaces the character-column tab lanes in the
   notation box. Click cycles frets 1-12, right-click clears. The grid is the
   source of truth for tab content and regenerates lane text on every change.
+  **Removed Oct 2 2026** — redundant with track drag-and-drop.
 - **Tab overlay** (`src/tab-overlay.ts`): the chord/tab overlay logic extracted
   from `riff-main.ts` so it is testable without a browser. Chord notes land on
   their own string rows at the bar line; tab notes override them on the same
@@ -83,9 +84,11 @@ finger-number/learning aids.
 **Landed on `main` Oct 2 2026 (commit `1374888`) — the track view, now
 DAW-style regions.** The riff page's top section is ONE track (`src/track.ts`,
 `renderTrack`): a bar ruler, one chord lane (chord name + auto-voiced
-shape), six string lanes (tab notes, with sticky lane letters and step
+shape), six string lanes (tab notes, with step
 gridlines), and the loop region + playhead overlaid — every horizontal
-position a fraction of one `.track-canvas`, from `src/timeline.ts`. Every
+position a fraction of one `.track-canvas`, from `src/timeline.ts`. (The
+string names moved into a sticky left gutter, `.track-gutter`, on Oct 3;
+no position is a px, regions included.) Every
 event is a REGION: left edge exactly at its start beat, width exactly its
 span, so the playhead touches a region's left edge the moment it sounds.
 The model has no explicit durations, so a region runs to the next event OF
@@ -112,21 +115,17 @@ clipping (regions don't overhang, so nothing clips). One alignment trap the
 user caught by eye AFTER the regions landed: the 4rem container padding
 that had un-clipped the old centered blocks now sat between the scrollbar
 and the canvas, and the two read as misaligned — so `.track` carries NO
-padding (the space before the music is the lead-in beat's own width, and
-padding the canvas instead would stretch the beat fractions across it).
+padding (every position is a fraction of the canvas; padding would
+stretch the beat fractions across it).
 The playhead is centered on its beat (`translateX(-50%)`) so it straddles
 the exact position and stays half-visible at the flush canvas edges.
 
-**Lead-in beat (Oct 1, user's request):** the track opens one beat BEFORE
-the music — the timeline spans `[-1, totalBeats]` (`LEAD_IN_BEATS = 1` in
-`src/timeline.ts`), the canvas is one beat wider, and playback starts at
-beat −1 (`TransportOptions.leadInBeats` — the count-in's anchor shift,
-metronome-independent). Press Play and the playhead sweeps the empty beat
-in silence (a click if the metronome is on — never a downbeat) before the
-first region sounds. The pause is OUTSIDE the loop window, so it happens on
-Play, not on wraps — a 17-beat loop would drift the bar lines against the
-metronome. The geometry functions take `leadInBeats` (default 0), so the
-same-beat-same-pixel invariant is untouched, just shifted.
+**Lead-in beat (Oct 1, user's request — REMOVED Oct 3 2026):** the track
+used to open one beat before the music and Play swept the empty beat in
+silence/click. The user didn't want it, so `LEAD_IN_BEATS` is `0` and the
+transport's `leadInBeats` option is dormant (default 0, still exercised by
+`tests/transport.test.mjs`). The geometry plumbing for lead-in remains so
+shifting beat 0 in is a one-line change, but nothing in the app uses it.
 
 Status: `npm test` green; verified in a browser by the user. Remaining
 known issues:
@@ -138,7 +137,9 @@ known issues:
   `stepName()` lost its only UI caller; the function and its tests remain.
 - ~~`riff.html` had TWO `#tab-editor` divs~~ — fixed when the page became
   tool tabs (Chords/Tab/Text/Settings, Oct 2 2026): one `#tab-editor` now.
-  The chord panel's duplicated intro paragraph is deduped too.
+  The chord panel's duplicated intro paragraph is deduped too. (#tab-editor
+  itself was then REMOVED the same day — the click-grid was redundant with
+  the track; the Tab tab is now just the note-chip palette plus how-to.)
 
 **Phase 2 — drag-and-drop editing (landed, Oct 2 2026, `1374888`).** The track is no longer read-only: chord regions drag to a new
 bar (**replace** — the user's call over swap: the target bar's chord dies,
@@ -155,8 +156,11 @@ the same timeline geometry as the regions, so the slot it shows is the slot
 the drop writes. **New notation: `-` in the chord stream is a rest bar**
 (no chord event, bar preserved) — replace semantics needs it, because a
 positional stream cannot otherwise leave an empty bar. A TRAILING rest
-extends nothing (`totalBeats` is event-driven). Pins survive rests: they
-are index-aligned with chord EVENTS and rests are not chords. Tests:
+is still a bar (`totalBeats` also counts chord tokens). Pins survive rests: they
+are index-aligned with chord EVENTS and rests are not chords (and since Oct
+3 the pin array is rewritten alongside the token edit — `movePins` for a
+chord move, `insertOrReplacePin` for a chip add; previously a move
+dropped/misaligned pins and an add overwrote one). Tests:
 `tests/track-edit.test.mjs` (translators, incl. the 2-digit-fret shadow
 rule), rest bars in `tests/riff.test.mjs`, `beatAtFraction` round-trip in
 `tests/timeline.test.mjs`. A **builder palette** (chord chips + 12 note
@@ -168,8 +172,12 @@ by the user.
 
 **Tool tabs (Oct 2 2026, same commit).** The riff page is no longer one
 long scroll: the track + transport stay on top, and everything else lives
-under a Chords / Tab / Text / Settings tab strip — each tool an editor
-over the same notation string. Watch two gotchas that this exposed:
+under a tab strip — each tool an editor over the same notation string.
+It started as Chords/Tab/Text/Settings; the Tab tab (a redundant click-grid,
+then a note-chip palette) was dropped the same day in favor of
+**click-to-edit on the track itself**: clicking a string lane pops a small
+input at that column — a typed fret writes there, an empty entry deletes.
+Watch two gotchas that this exposed:
 `.fingering-panel { display: flex }` used to BEAT the `hidden` attribute,
 so every panel showed at once (now `[hidden] { display: none !important }`
 in style.css, guarded by smoke), and the page briefly carried TWO
@@ -401,7 +409,8 @@ resolved to *frequencies* via `tuning[stringIndex] + fret`; there is no raw
 Hz/MIDI input yet. A `-` token in the chord line is a **rest bar** (no chord
 event, bar preserved — positions are token indices); it exists so a chord
 dragged off its bar leaves an empty bar instead of shifting every chord
-after it. A trailing rest extends nothing (`totalBeats` is event-driven), a
+after it. A trailing rest is still a bar (`totalBeats` counts chord tokens
+as well as lane width), a
 rest-only stream is refused like an empty box, and pins are aligned with
 chord EVENTS so a rest never shifts them.
 
@@ -513,7 +522,8 @@ textarea out of `riff.html` and every fenced tab example out of `README.md` and
 this file, and asserts each one parses with no warnings. A tab lane's length is
 its character count, so a hand-edited example silently breaks the *app's own
 default* (it once shipped 26- vs 29-column lanes, and a fresh Riff page opened
-on a "lanes have different lengths" error). When you touch a notation example,
+on a tab-length error — the parser now pads with a warning instead). When you
+touch a notation example,
 `npm test` is the check — don't eyeball the columns. Related: a comment marker
 only opens a comment at the **start** of a token, so `C Am F#m7 Bb7 # cadence`
 keeps all four chords; a mid-token `#` is a sharp.
@@ -639,23 +649,25 @@ that fills, and assert the note COUNT: a probe that skips missing notes reports
   builder's playback (injected clock/ticker so the smoke test can drive it).
   Carries `TransportOptions` (`metronome`, `countInBars`, `leadInBeats`) and
   a `onClick` callback.
-- `src/tab-editor.ts` — the visual tab editor grid (one row per string, one column
-  per step). Clickable cells that generate lane text for the notation.
 - `src/tab-overlay.ts` — `buildOverlay(riff)`: pure chord/tab overlay logic,
   extracted from `riff-main.ts` so it is testable without a browser.
 - `src/timeline.ts` — pure timeline geometry (`trackFraction`,
   `noteLeftPercent`, `barMarkFraction`, `stepColumns`,
   `gridlinePeriodFraction`): every horizontal position as a fraction of the
   track, no DOM, no px. Also home of `LEAD_IN_BEATS` — the empty beats the
-  track shows (and the transport plays) before the music starts.
+  track would show before the music starts (0 since Oct 3; kept as
+  plumbing, exercised by the transport tests).
   Unit-tested in `tests/timeline.test.mjs`.
 - `src/track.ts` — `renderTrack` + `setTrackPlayhead`: the unified track view
   (bar ruler + chord lane + string lanes + loop + playhead on one canvas,
   DAW-style regions). In flight — see "In flight" at the top.
 - `src/track-edit.ts` — pure drag-and-drop edit translators
   (`chordTokensFromText`, `moveChordToken`, `tokenIndexForChordOrdinal`,
-  `moveLaneNote`): a drop on the track translates to a notation-text edit
-  here, then the usual machinery re-renders. Unit-tested in
+  `moveLaneNote`, `movePins`/`insertOrReplacePin`): a drop on the track
+  translates to a notation-text edit here, then the usual machinery
+  re-renders. The pin translators keep voicing pins aligned with the
+  chord events across moves and adds (rests hold no pin); before them a
+  move dropped/misaligned pins and an add overwrote one. Unit-tested in
   `tests/track-edit.test.mjs`.
 - `src/dnd.ts` — the app's only drag-and-drop machinery: a thin wrapper over
   the native HTML5 API with a module-level drag session (`dataTransfer` is
@@ -1056,6 +1068,9 @@ Both `dev-audio` and `song-mode` remain as offline history only.
 - **Track drag-and-drop** — Phase 2 (moves) + builder palette + undo are
   LANDDED (`1374888`). Remaining: region resize (needs explicit durations
   in the model first) and delete-by-drag-off.
+- **Export / import riffs** — download the notation (plain text vs JSON
+  wrapping notation + pins + settings is an open call) and reload it later.
+  Not started by design; note kept in `NOW.md`.
 - **The sliced-kit pivot (IN FLIGHT — phase A landed, uncommitted).** See
   "progress 23" at the bottom of this file for the full write-up. In one line:
   the shipped smplr kits decode **all 88 notes (A0..C8, 2.6 MB) on every page

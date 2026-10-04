@@ -14,15 +14,14 @@
  * `left: 0%` and a playhead at beat 0 must land on the same pixel, and so must
  * a note at beat 14 and a playhead passing beat 14.
  *
- * Lead-in: the track can open with empty beats BEFORE beat 0 (the riff page
- * plays a one-beat pause). The timeline then spans [-leadIn, totalBeats], so
- * beat 0 sits one lead-in's width in from the left edge and a playhead in the
- * pause sweeps from 0 up to it. Every position takes the same lead-in, which
- * is the whole point: the invariant above is untouched, just shifted.
+ * Lead-in: the timeline can open with empty beats BEFORE beat 0. It
+ * defaults to none (the riff page sets LEAD_IN_BEATS = 0), in which
+ * case every position is just shifted by zero and the invariant above
+ * is untouched.
  */
 
 /** Empty beats the riff page shows (and plays) before the music starts. */
-export const LEAD_IN_BEATS = 1;
+export const LEAD_IN_BEATS = 0;
 
 /** Column count: one column per step, rounded UP so the last event is never clipped. */
 export function stepColumns(totalBeats: number, stepBeats: number): number {

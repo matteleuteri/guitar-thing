@@ -1,7 +1,7 @@
 # NOW.md — where the riff trainer stands
 
-**Written:** Oct 1 2026, for picking this up later. Updated Oct 2 2026.
-**Branch:** `main` — 1 commit ahead of `origin/main`, **unpushed** (`1374888`).
+**Written:** Oct 1 2026, for picking this up later. Updated Oct 3 2026.
+**Branch:** `main` — 1 commit ahead of `origin/main`, **unpushed**.
 
 > Design detail lives in `AGENTS.md` ("In flight" at the top, then "Riff
 > trainer"). User-facing docs in `README.md`. This file is only "where we are
@@ -25,8 +25,8 @@ section of the page.
 | | |
 |---|---|
 | Branch | `main`, 1 commit ahead of `origin/main`, **unpushed** |
-| Working tree | Clean — `1374888` holds Phase 2 + palette + undo + tool tabs |
-| Gate | `npm test` → **ALL PASS** (smoke + audio-sched + 80 unit tests) |
+| Working tree | Clean — `HEAD` holds the pin-alignment fix, no lead-in beat, and the left gutter |
+| Gate | `npm test` → **ALL PASS** (smoke + audio-sched + 87 unit tests) |
 | Sound | **Ear-approved** — last playback "sounded good" (smplr kit) |
 | Track view / drag / tool tabs in a browser | **Verified by the user.** |
 | Live site | Deployed from the last push; one commit behind the repo |
@@ -35,8 +35,11 @@ section of the page.
 
 The riff page's top section is ONE track of **DAW-style regions**
 (`src/track.ts`): a bar ruler, a chord lane (name + auto-voiced shape), six
-string lanes (tab notes, with sticky letters + step gridlines), and the loop
-region + playhead overlaid on one canvas. Every event is a region — left
+string lanes (tab notes), and the loop
+region + playhead overlaid on one canvas. The string names sit in a sticky
+LEFT gutter (`.track-gutter`) outside the canvas, so regions never slide
+under them (the old in-lane sticky letter chips are gone, Oct 3). Every
+event is a region — left
 edge exactly at its beat, width = its span — so the playhead touches a
 region's left edge the moment it sounds. Spans are inferred
 (`regionEnds`): a chord rings until the next chord, a tab note until the
@@ -51,41 +54,41 @@ measured the result as "off by a half beat" (and the maths agreed: a ~4rem
 block's left edge sits ~2rem early = one eighth-note column) →
 left-anchored regions, which also show duration as a bonus.
 
-**Also in the tree (Oct 1):** a **lead-in beat** — the track opens one beat
-before the music (`LEAD_IN_BEATS = 1`), and Play sweeps the empty beat
-(silent, or a click if the metronome is on) before the first region sounds.
-Play-time only: loop wraps go straight back to the loop start, so bar lines
-never drift against the metronome.
+~~**Also in the tree (Oct 1):** a **lead-in beat**~~ — REMOVED Oct 3 2026:
+`LEAD_IN_BEATS` is now `0`, Play starts on the first beat, and the
+transport's `leadInBeats` option is dormant (default 0, still tested).
 
-**And Phase 2 — drag-and-drop editing:** chord regions drag to a new bar
-(replace: the target chord dies, the source bar becomes a `-` rest — new
-notation), note regions drag to a new (string, column) keeping the fret.
-Every drop rewrites the notation text through the pure translators in
-`src/track-edit.ts` (tested); the drag machinery is `src/dnd.ts` (~80
-lines, native HTML5 API). Deliberately absent: palette, region resize,
-delete-by-drag-off, undo.
+**Update Oct 2 2026 — committed as `1374888`, and everything in the wishlist
+got done that session:** builder palette (chord chips draggable onto the
+track), the Undo button, and the page reorganized into tool tabs over the
+one notation. The track, tool tabs, drag and undo were all verified in a
+browser. Also that day: the visual tab-editor grid was judged redundant
+with track drag-and-drop and removed, the Text tab now warns that a typed
+chord name gets its fingering picked by the app (pin shapes in Chords),
+and note entry moved onto the track itself — click a string lane, type
+the fret number (empty = delete). The Tab tab and note-chip palette went
+away; strip is Chords / Text / Settings.
 
-## Next step: try the drag in a browser, then commit
+**Oct 3 2026 (unpushed commit on `main`):** tab editor fully removed,
+pins follow chords on drag/add (`movePins`/`insertOrReplacePin`), the
+pending-chord "Use" button no longer grays out after ◀ ▶ (browse and
+commit are separate state), the lead-in beat is gone (`LEAD_IN_BEATS = 0`),
+and the string names live in a sticky left gutter outside the track canvas.
 
-80 unit checks green, but the drag wiring is DOM code the tests cannot see
-— verify by hand: drag a chord (bar swap → the notation line rewrites
-itself, source becomes a `-`), drag a note across columns and across
-strings (fret travels), check the dashed indicator lands where the drop
-lands, and check click-to-play still works (a click is not a drag).
+## Next up (pick one)
 
-Then:
-
-1. Commit + push (deploys the site; hard-refresh after the deploy —
-   Pages' 10-minute module cache).
+1. Push `main` to deploy (hard-refresh after — Pages' 10-minute module
+   cache). One commit sits unpushed on `main`.
 2. **Dead code**: `renderRiffTimeline`/`setRiffPlayhead` have no live
    caller, and `smoke.mjs` still guards the old timeline's source shape —
    repoint or delete.
-3. **`riff.html` duplicate `#tab-editor`** — the Fingering → Tab panel is
-   always empty; the chord panel's intro paragraph is duplicated too.
-
-After that, the Phase 2 remainder (see `AGENTS.md` backlog): palette for
-adding new events, region resize (needs durations in the model),
-delete-by-drag-off, undo stack.
+3. Phase 2 remainder (see `AGENTS.md` backlog): region resize (needs
+   explicit durations in the model), delete-by-drag-off.
+4. **Export / import riffs** — user wants to download a riff file and
+   reload it later. OPEN DESIGN QUESTIONS: plain text (the notation, minus
+   directives?) vs a small JSON wrapping notation + pins + settings;
+   whether the chord/tab lanes stay as-is; where the UI affordance lives
+   (a Download / Load row in the Track section?). Not started by design.
 
 ## House rules for whoever picks this up
 

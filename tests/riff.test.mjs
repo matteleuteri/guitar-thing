@@ -98,12 +98,19 @@ test("articulation marks are accepted and ignored", () => {
   assert.deepEqual(marked, plain, "an articulation mark changed the timing");
 });
 
-test("lanes of unequal length are rejected, and both lengths are named", () => {
-  // A hand-edited example silently broke the app's own default once, because
-  // nothing complained until the page opened on an error.
-  assert.throws(
-    () => parse("tempo 120\nbar 4\ne|0-0-0-0|\nB|3-3-|"),
-    (err) => /length/i.test(err.message) && /lane/i.test(err.message) && /4/.test(err.message),
+test("lanes of unequal length are padded with a warning, not rejected", () => {
+  // A two-digit fret makes its lane one column longer than the rest; rather
+  // than kill the whole parse, the short lanes get dashes and a warning.
+  const riff = parse("tempo 120\nbar 4\ne|0-0-0-0|\nB|3-3-|");
+  const all = riff.events.filter((e) => e.kind === "note").flatMap((e) => e.notes);
+  assert.equal(all.length, 6, "both lanes keep playing");
+  const eNotes = riff.events.filter((e) => e.notes.some((n) => n.stringIndex === 5)).map((e) => e.beat);
+  const bNotes = riff.events.filter((e) => e.notes.some((n) => n.stringIndex === 4)).map((e) => e.beat);
+  assert.deepEqual(eNotes, [0, 1, 2, 3]);
+  assert.deepEqual(bNotes, [0, 1], "the short lane's notes still sit on their columns");
+  assert.ok(
+    riff.warnings.some((w) => /lane "B"/.test(w) && /padded/.test(w)),
+    `the short lane is named in a warning (${riff.warnings.join("; ") || "none"})`,
   );
 });
 
@@ -221,9 +228,9 @@ test("a rest bar holds its position: no chord event, later chords keep their bar
   );
 });
 
-test("a trailing rest extends nothing (totalBeats is event-driven)", () => {
+test("a trailing rest is still an empty bar (totalBeats counts chord tokens)", () => {
   const riff = parse("tempo 96\nbar 4\nC Am F -");
-  assert.equal(riff.totalBeats, 12, "silence past the last event is not rendered");
+  assert.equal(riff.totalBeats, 16, "silence past the last event still shows as grid");
 });
 
 test("a stream of only rests is refused like an empty box", () => {

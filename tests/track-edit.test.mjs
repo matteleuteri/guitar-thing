@@ -10,8 +10,10 @@ import assert from "node:assert/strict";
 import {
   CHORD_REST,
   chordTokensFromText,
+  insertOrReplacePin,
   moveChordToken,
   moveLaneNote,
+  movePins,
   tokenIndexForChordOrdinal,
 } from "../dist/track-edit.js";
 
@@ -62,6 +64,71 @@ test("chord ordinals skip rest bars, token indices do not", () => {
   assert.equal(tokenIndexForChordOrdinal(tokens, 1), 2, "Am is chord 1, token 2");
   assert.equal(tokenIndexForChordOrdinal(tokens, 2), 3);
   assert.equal(tokenIndexForChordOrdinal(tokens, 3), -1, "no fourth chord");
+});
+
+// --- movePins ---
+
+test("a moving chord carries its pin; the replaced chord's pin dies", () => {
+  // Pins are event-ordinal aligned. Move C (event 0) onto F's bar: F is
+  // gone, so its pin must be gone too, and C's pin follows C.
+  const pins = ["pC", "pAm", "pF", "pG"];
+  assert.deepEqual(
+    movePins(pins, ["C", "Am", "F", "G"], 0, 2),
+    ["pAm", "pC", "pG"],
+  );
+});
+
+test("a chord moved left carries its pin past the middles", () => {
+  const pins = ["pC", "pD", "pE", "pF"];
+  assert.deepEqual(
+    movePins(pins, ["C", "D", "E", "F"], 3, 0),
+    ["pF", "pD", "pE"],
+  );
+});
+
+test("dropping onto a rest bar relocates the pin without eating one", () => {
+  // The rest held no pin, so nothing may be removed from the pin array.
+  const pins = ["pC", "pE"];
+  assert.deepEqual(
+    movePins(pins, ["C", CHORD_REST, "E"], 0, 1),
+    ["pC", "pE"],
+  );
+  assert.deepEqual(
+    movePins(["pC", "pD", "pE"], ["C", "D", CHORD_REST, "E"], 3, 2),
+    ["pC", "pD", "pE"],
+  );
+});
+
+test("a no-op move returns an equivalent pin list", () => {
+  const pins = ["pC", null, "pF"];
+  assert.deepEqual(movePins(pins, ["C", "Am", "F"], 1, 1), pins);
+});
+
+// --- insertOrReplacePin ---
+
+test("a chip dropped on a rest splices the pin in, shifting later ones", () => {
+  // Inserting a chord adds an event; every pin after the drop must move over
+  // one, not get overwritten.
+  const pins = ["pC", "pF"];
+  assert.deepEqual(
+    insertOrReplacePin(pins, ["C", CHORD_REST, "F"], 1, "pAm"),
+    ["pC", "pAm", "pF"],
+  );
+});
+
+test("a chip dropped on a chord replaces that chord's pin in place", () => {
+  const pins = ["pC", "pAm", "pF"];
+  assert.deepEqual(
+    insertOrReplacePin(pins, ["C", "Am", "F"], 1, "pAm2"),
+    ["pC", "pAm2", "pF"],
+  );
+});
+
+test("a chip dropped past the end appends the pin", () => {
+  assert.deepEqual(
+    insertOrReplacePin(["pC"], ["C"], 3, "pG"),
+    ["pC", "pG"],
+  );
 });
 
 // --- moveLaneNote ---

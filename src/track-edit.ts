@@ -80,6 +80,70 @@ export function tokenIndexForChordOrdinal(tokens: string[], ordinal: number): nu
 }
 
 /**
+ * The chord events' ordinal numbering skips rests; this is the count of
+ * non-rest chords strictly before token index `i` — the event ordinal the
+ * chord at `i` will have (or where a chord inserted at `i` will land).
+ */
+function eventOrdinalBefore(tokens: string[], i: number): number {
+  let n = 0;
+  for (let k = 0; k < i && k < tokens.length; k++) {
+    if (tokens[k] !== CHORD_REST) n++;
+  }
+  return n;
+}
+
+/**
+ * Pins are index-aligned with the chord EVENTS (rests hold no pin), so a
+ * chord move must carry the pinned shape with its chord — and the replaced
+ * chord's pin must die — or every pin between the two bars silently lands on
+ * the wrong chord. Replace semantics (see moveChordToken): the moved chord's
+ * pin moves to the target's new event ordinal; the target's pin is dropped;
+ * pins over a rest bar hold no slot, so a move onto a rest just relocates.
+ */
+export function movePins<T>(
+  pins: (T | null)[],
+  tokens: string[],
+  from: number,
+  to: number,
+): (T | null)[] {
+  if (from === to || from < 0 || to < 0 || from >= tokens.length) return pins.slice();
+  const next = pins.slice();
+  const ordFrom = eventOrdinalBefore(tokens, from);
+  const movedPin = next.splice(ordFrom, 1)[0] ?? null;
+  if (to < tokens.length && tokens[to] !== CHORD_REST) {
+    // The target held a chord event; after its replacement the array has one
+    // fewer entry before it, so its ordinal shifted down by one iff the
+    // source was before it.
+    const ordTo = eventOrdinalBefore(tokens, to);
+    next.splice(ordFrom < ordTo ? ordTo - 1 : ordTo, 1);
+  }
+  next.splice(eventOrdinalBefore(moveChordToken(tokens, from, to), to), 0, movedPin);
+  return next;
+}
+
+/**
+ * A chip drop writes a chord onto bar `bar`: if it lands on a real chord,
+ * the chord's event ordinal is unchanged and its pin is REPLACED by the
+ * chip's pin; if it lands on a rest (or extends the stream), the new event
+ * shifts every later pin up one, so splice it in rather than overwriting.
+ */
+export function insertOrReplacePin<T>(
+  pins: (T | null)[],
+  tokens: string[],
+  bar: number,
+  pin: T,
+): (T | null)[] {
+  const next = pins.slice();
+  const at = eventOrdinalBefore(addChordToken(tokens, bar, "_"), bar);
+  if (bar < tokens.length && tokens[bar] !== CHORD_REST) {
+    next[at] = pin;
+  } else {
+    next.splice(at, 0, pin);
+  }
+  return next;
+}
+
+/**
  * The lowest fret on a string that sounds a pitch class (0 = the open
  * string). What a note-chip drop writes: the user thinks in notes, the app
  * answers in frets.
@@ -131,6 +195,22 @@ export function setLaneNote(
   fret: number,
 ): boolean {
   return writeFret(lanes, to, fret) !== null;
+}
+
+/**
+ * Delete the tab note at a cell (a track click with an empty entry). The
+ * cell clears to null; lane widths are unchanged (a cleared cell is a
+ * rest column). Returns false when there was nothing there to clear.
+ */
+export function clearLaneNote(
+  lanes: Map<number, (number | "x" | null)[]>,
+  at: { string: number; column: number },
+): boolean {
+  const cells = lanes.get(at.string);
+  if (!cells || at.column < 0 || at.column >= cells.length) return false;
+  if (cells[at.column] === null) return false;
+  cells[at.column] = null;
+  return true;
 }
 
 /**

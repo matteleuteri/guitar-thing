@@ -47,12 +47,14 @@
               <button id="riff-play" type="button">Play ▶</button>
               <button id="riff-stop" type="button">Stop</button>
               <button id="riff-undo" type="button" disabled title="Undo the last drag-and-drop or builder-chip edit">Undo</button>
+              <button id="riff-add-bars" type="button" title="Append four empty bars (chord rests + lane padding) to the riff">+ 4 bars</button>
             </span>
           </div>
         </div>
         <p class="muted riff-drag-hint">
-          Drag a chord region to another bar (its old bar becomes a <code>-</code> rest), or a note region to
-          another string or column — the notation rewrites itself.
+          Drag a chord region to another bar (its old bar becomes a <code>-</code> rest), drag a note region to
+          another string or column, or click any string lane to type a fret number at that beat — the notation
+          rewrites itself.
         </p>
         <div id="riff-output"></div>
       </section>
@@ -61,21 +63,17 @@
         <h2>Tools</h2>
         <div class="fingering-tabs">
           <button class="fingering-tab is-active" data-tool="chords" type="button">Chords</button>
-          <button class="fingering-tab" data-tool="tab" type="button">Tab</button>
-          <button class="fingering-tab" data-tool="text" type="button">Text</button>
+          <button class="fingering-tab" data-tool="notes" type="button">Notes</button>
           <button class="fingering-tab" data-tool="settings" type="button">Settings</button>
         </div>
         <div class="fingering-panel" data-tool-panel="chords">
           <p class="muted">
-            Every chord in the stream, in order. Pick one, then step through its voicings — the list is ordered by how
-            little your hand moves from the chord before it, so the first few are the smoothest. <strong>Auto</strong>
-            hands the chord back to the search; a stepped choice is <em>pinned</em>, and the chords after it re-optimize
-            around it. <span id="voicing-summary" class="muted"></span>
+            Every chord in the stream, in order. When the same name lands on several bars, their tabs name the bar —
+            and each occurrence can be pinned to a different voicing, so one C can sit as x32010 in one bar and
+            xx0212 in another. Pick one, then step through its voicings — the list is ordered by how little your hand moves from the chord before it, so the
+            first few are the smoothest. <strong>Auto</strong> hands the chord back to the search; a stepped
+            choice is <em>pinned</em>, and the chords after it re-optimize around it. <span id="voicing-summary" class="muted"></span>
           </p>
-          <div class="field">
-            <label for="riff-progression">Chord progression</label>
-            <input id="riff-progression" type="text" value="C Am F G" spellcheck="false" title="One chord per bar, separated by spaces. Auto-aligns each chord to its bar mark on the ruler." />
-          </div>
           <div class="builder-row">
             <span class="builder-label">Chords</span>
             <div id="chord-chips" class="builder-chips"></div>
@@ -90,14 +88,14 @@
           <div id="voicing-tabs" class="voicing-tabs"></div>
           <div id="voicing-picker" class="voicing-picker"></div>
         </div>
-        <div class="fingering-panel" data-tool-panel="tab" hidden>
-          <div class="builder-row">
-            <span class="builder-label">Notes</span>
-            <div id="note-chips" class="builder-chips"></div>
-          </div>
-          <div id="tab-editor" class="tab-editor"></div>
-        </div>
-        <div class="fingering-panel" data-tool-panel="text" hidden>
+        <div class="fingering-panel" data-tool-panel="notes" hidden>
+          <p class="muted">
+            Directives and tab lanes only — the chord stream is laid out on the <strong>Track</strong> (each event is its
+            bar). Every character in a lane is one column:
+            <code>-</code>/space rest, <code>x</code> mute, a number is a fret, and a <strong>two-digit fret occupies
+            two columns</strong>, so it needs a matching dash in the other lanes (the app pads and warns when one
+            lane runs long). Clicking a string lane on the track also writes into these lanes.
+          </p>
           <div class="field field-wide">
             <div class="riff-box">
               <div class="riff-grid" id="riff-grid" aria-hidden="true"></div>
@@ -111,7 +109,10 @@ strum 55
   C       Am      F       G
 e|5---5---7---7---8---8---7---5---|
 B|----------------3---5---5---3---|
-G|--------------------------------|</textarea
+G|--------------------------------|
+D|--------------------------------|
+A|--------------------------------|
+E|--------------------------------|</textarea
               >
             </div>
           </div>
@@ -148,8 +149,9 @@ G|--------------------------------|</textarea
                 two-digit fret uses two columns, so <code>10</code> is wider than <code>9</code>.
               </li>
               <li>
-                Every lane must be the <strong>same number of characters</strong> — pad the short ones with dashes, or a
-                bar shifts sideways.
+              If the lanes are <strong>different lengths</strong>, the short ones are padded with rests and a warning
+              appears in the readout — a bar can't shift sideways because every character is a column (watch a
+              two-digit fret, it costs a column).
               </li>
             </ul>
             <ul>

@@ -3,7 +3,6 @@ import { chordShape } from "./fretboard.js";
 import {
   chordName,
   midiName,
-  noteLabels,
   noteName,
   parseChord,
   parseStringMidi,
@@ -14,10 +13,9 @@ import {
   type VoicingPin,
 } from "./song.js";
 import { DEFAULT_CONFIG } from "./synth/config.js";
-import { el, colorFor, renderChordDiagram, renderRiffGrid, renderRiffReading, setRiffPlayhead } from "./render.js";
+import { el, renderChordDiagram, renderRiffGrid, renderRiffReading, setRiffPlayhead } from "./render.js";
 import { parseRiff, secondsPerBeat, type Riff, type RiffEvent } from "./riff.js";
 import { RiffTransport } from "./transport.js";
-import { TabEditor } from "./tab-editor.js";
 import { buildOverlay } from "./tab-overlay.js";
 import { renderTrack, setTrackPlayhead, type DragPayload } from "./track.js";
 import { LEAD_IN_BEATS } from "./timeline.js";
@@ -26,9 +24,11 @@ import {
   CHORD_REST,
   addChordToken,
   chordTokensFromText,
-  fretForPitchClass,
+  clearLaneNote,
+  insertOrReplacePin,
   moveChordToken,
   moveLaneNote,
+  movePins,
   replaceChordLine,
   setLaneNote,
   tokenIndexForChordOrdinal,
@@ -70,7 +70,6 @@ const picker = document.getElementById("voicing-picker") as HTMLDivElement;
 const voicingSummary = document.getElementById("voicing-summary") as HTMLSpanElement;
 const trackEl = document.getElementById("track") as HTMLDivElement;
 const chordChips = document.getElementById("chord-chips") as HTMLDivElement;
-const noteChips = document.getElementById("note-chips") as HTMLDivElement;
 const chordAddInput = document.getElementById("chord-add") as HTMLInputElement;
 
 const tuningSelect = document.getElementById("tuning") as HTMLSelectElement;
@@ -87,7 +86,6 @@ const loopStartInput = document.getElementById("riff-loop-start") as HTMLInputEl
 const loopEndInput = document.getElementById("riff-loop-end") as HTMLInputElement;
 const metronomeInput = document.getElementById("riff-metronome") as HTMLInputElement;
 const countInInput = document.getElementById("riff-countin") as HTMLInputElement;
-const progressionInput = document.getElementById("riff-progression") as HTMLInputElement;
 const playButton = document.getElementById("riff-play") as HTMLButtonElement;
 const stopButton = document.getElementById("riff-stop") as HTMLButtonElement;
 
@@ -105,8 +103,8 @@ tuningSelect.addEventListener("change", () => {
 
 /**
  * Snapshots of the notation taken before every PROGRAMMATIC rewrite (a drag
- * drop, a builder-chip add, a tab-editor cell, a progression-input apply —
- * they all funnel through the two `text.value = ...` sites). Native textarea
+ * drop, a builder-chip add, a note drag, a progression-input apply —
+ * they all funnel through the two `source = ...` sites). Native textarea
  * undo is useless here because setting `.value` from script clears its stack,
  * so the app keeps its own. User typing into the box is left to the native
  * undo; this stack is for edits the user made by clicking/dragging.
@@ -121,8 +119,8 @@ function updateUndoButton(): void {
 
 /** Record the current notation before overwriting it. No-op if unchanged. */
 function pushUndo(): void {
-  if (undoStack[undoStack.length - 1] === text.value) return;
-  undoStack.push(text.value);
+  if (undoStack[undoStack.length - 1] === source) return;
+  undoStack.push(source);
   if (undoStack.length > UNDO_CAP) undoStack.shift();
   updateUndoButton();
 }
@@ -130,24 +128,17 @@ function pushUndo(): void {
 undoButton.addEventListener("click", () => {
   const previous = undoStack.pop();
   if (previous === undefined) return;
-  text.value = previous;
+  source = previous;
+  notesViewDirty = false;
   updateUndoButton();
   stop();
   refresh();
 });
 
-// --------------------------------------------------------- tab editor ----
+// --------------------------------------------------------- tab lanes ----
 
 /** Tuning index → lane label. Index 5 = high e, index 0 = low E. */
 const LABEL_FOR_STRING = ["E", "A", "D", "G", "B", "e"];
-let tabEditor: TabEditor | null = null;
-
-const tabEditorContainer = document.getElementById("tab-editor") as HTMLDivElement;
-tabEditor = new TabEditor(tabEditorContainer, {
-  beatsPerBar: 4,
-  stepBeats: 0.5,
-  onChange: (lanes) => updateTabLanes(lanes),
-});
 
 /**
  * Generate the tab lane text for one string from the grid. Each cell is one
@@ -178,16 +169,23 @@ function updateTabLanes(lanes: Map<number, (number | "x" | null)[]>): void {
   if (!riff) return;
 
   const laneLines: string[] = [];
+  let width = 0;
+  for (const cells of lanes.values()) width = Math.max(width, cells.length);
   for (let s = 5; s >= 0; s--) {
     const cells = lanes.get(s);
-    if (!cells || !cells.some((c) => c !== null)) continue;
-    const body = tabLaneText(
-      cells.map((c) => (typeof c === "number" ? c : null)),
-    );
-    laneLines.push(`${LABEL_FOR_STRING[s]}|${body}|`);
+    // Always print every string, even an unused one (a run of dashes) — a
+    // complete lane set keeps the notation readable and the editors' widths
+    // aligned. `width` is the widest overlay row; a missing row is all rests.
+    const row: (number | null)[] = [];
+    for (let i = 0; i < width; i++) {
+      const cell = cells?.[i];
+      row.push(typeof cell === "number" ? cell : null);
+    }
+    laneLines.push(`${LABEL_FOR_STRING[s]}|${tabLaneText(row)}|`);
   }
+  if (width === 0) return; // nothing tab-side to write (chord-only riff)
 
-  const lines = text.value.split("\n");
+  const lines = source.split("\n");
   const newLines: string[] = [];
   for (const line of lines) {
     if (/^\s*[eBGDAE]\s*\|/.test(line)) continue; // drop old tab lanes
@@ -203,28 +201,40 @@ function updateTabLanes(lanes: Map<number, (number | "x" | null)[]>): void {
   }
   newLines.splice(insertAt, 0, ...laneLines);
   const next = newLines.join("\n");
-  if (next === text.value) return;
+  if (next === source) return;
   pushUndo();
-  text.value = next;
+  source = next;
   stop();
   refresh();
 }
 
-/** Parse the notation into the grid via the shared overlay builder. */
-function syncTabEditor(): void {
-  if (!tabEditor || !plan) return;
-  tabEditor.setLanes(buildOverlay(plan));
+/**
+ * Append four empty bars: rest tokens in the chord line, dash columns on every lane.
+ */
+function addFourBars(): void {
+  const riff = plan;
+  if (!riff) return;
+  const cols = Math.max(1, Math.round((riff.beatsPerBar * 4) / riff.stepBeats));
+  const { chordLine, rest } = splitChordLine(source);
+  const nextChordLine = chordLine === null ? null : `${chordLine} - - - -`;
+  const nextRest = lanesOf(rest).length
+    ? rest.replace(/^(\s*[eBGDAE]\s*\|)([^|]*)\|/gm, (_m, head: string, body: string) => `${head}${body}${"-".repeat(cols)}|`)
+    : rest;
+  const next = nextChordLine === null ? nextRest : withChordLine(nextRest, nextChordLine);
+  if (next === source) return;
+  pushUndo();
+  source = next;
+  notesViewDirty = false;
+  stop();
+  refresh();
 }
 
-/**
- * Reflect the notation's chord line back into the progression input, so the
- * input is a live view of the chord stream (not just a one-way write). Called
- * after every refresh; setting `.value` does not fire the input event, so
- * there is no loop with applyProgression.
- */
-function syncProgressionInput(): void {
-  progressionInput.value = chordTokensFromText(text.value).join(" ");
+/** Tab lane lines in a notation text. */
+function lanesOf(value: string): string[] {
+  return value.match(/^\s*[eBGDAE]\s*\|[^|]*\|/gm) ?? [];
 }
+
+document.getElementById("riff-add-bars")?.addEventListener("click", addFourBars);
 
 // The kit label is set after `preloadGuitarEngine` above, which may already have
 // restored a stored choice, so it must be read rather than assumed.
@@ -256,6 +266,8 @@ function readInt(input: HTMLInputElement, fallback: number): number {
 
 /** Pinned shapes, index-aligned with the chord stream. `null` = let the search decide. */
 let pins: (VoicingPin | null)[] = [];
+/** Browsed-but-not-yet-committed shapes, keyed by the view index. */
+const preview = new Map<number | string, string>();
 /** Which chord of the stream the picker is showing. */
 let focusIndex = 0;
 let plan: Riff | null = null;
@@ -264,6 +276,59 @@ let readingOpen: boolean | null = null;
 let transport: RiffTransport | null = null;
 let frame = 0;
 let editTimer = 0;
+
+/**
+ * The full notation (chord line included) is the source of truth. The
+ * textarea in the Notes tab is a VIEW of it minus the chord line — chords
+ * are built in the Chords tab, whose progression input is the live view of
+ * that line. Edits in the Notes box are spliced back around the preserved
+ * chord line; the box is only rewritten when the change did NOT come from
+ * the box itself (else typing loses its cursor).
+ */
+let source = text.value;
+let notesViewDirty = false;
+
+/** A chord typed into "+ chord" but not yet on the track. Its voicings are
+ * previewed in the picker, and the drop of its chip carries the previewed
+ * shape so the new chord is pinned to it from the first bar. */
+let pending: { key: string; name: string } | null = null;
+let focusPending = false;
+/** The shape being BROWSED for a pending chord. Stepping only previews —
+ *  `preview` (the shape the chip drop carries) updates on "Use for the
+ *  drop", not per arrow click. */
+let pendingBrowse: string | null = null;
+
+/** Split the source into the chord line and everything else, in order. */
+function splitChordLine(value: string): { chordLine: string | null; rest: string } {
+  const lines = value.split("\n");
+  const isDirective = (t: string) => /^(tempo|bpm|bar|step|grid|strum|release)\s+/i.test(t);
+  const index = lines.findIndex((line) => {
+    const t = line.trim();
+    if (!t || t.startsWith("#") || t.startsWith("//")) return false;
+    if (/^\s*[eBGDAE]\s*\|/.test(line)) return false;
+    return !isDirective(t);
+  });
+  if (index < 0) return { chordLine: null, rest: value };
+  return { chordLine: lines[index], rest: [...lines.slice(0, index), ...lines.slice(index + 1)].join("\n") };
+}
+
+/** Re-insert a chord line just before the first tab lane (or after the directives). */
+function withChordLine(notesText: string, chordLine: string): string {
+  const lines = notesText.split("\n");
+  const laneAt = lines.findIndex((line) => /^\s*[eBGDAE]\s*\|/.test(line));
+  if (laneAt >= 0) {
+    lines.splice(laneAt, 0, chordLine);
+  } else {
+    let insertAt = 0;
+    for (let i = 0; i < lines.length; i++) {
+      const t = lines[i].trim();
+      if (/^(tempo|bpm|bar|step|grid|strum|release)\s+/i.test(t) || !t || t.startsWith("#") || t.startsWith("//")) insertAt = i + 1;
+    }
+    lines.splice(insertAt, 0, chordLine);
+  }
+  return lines.join("\n");
+}
+
 
 const stop = () => {
   if (frame) cancelAnimationFrame(frame);
@@ -328,52 +393,55 @@ function formatChordLine(chords: string[], beatsPerBar: number, stepBeats: numbe
  * riff gaining its first chord via a builder chip). Tab lanes, directives,
  * and comments are preserved; the surgery itself is `replaceChordLine`.
  */
-function applyProgression(): void {
-  const chords = progressionInput.value.split(/\s+/).filter(Boolean);
+function applyProgression(chords: string[]): void {
   if (chords.length === 0) return;
 
   const riff: Riff | null = plan;
   if (!riff) return;
 
   const chordLine = formatChordLine(chords, riff.beatsPerBar, riff.stepBeats);
-  const next = replaceChordLine(text.value, chordLine);
-  if (next === text.value) return;
+  const next = replaceChordLine(source, chordLine);
+  if (next === source) return;
   pushUndo();
-  text.value = next;
+  source = next;
   stop();
   refresh();
 }
 
 // ------------------------------------------------------------ builders ----
 
-/** Chord chips the user added by name, on top of the progression's own. */
-const addedChords: string[] = [];
+/** Chord chips the user added by name, on top of the progression's own.
+ * Each entry is its own to-add chip — the same name can be added several
+ * times, once for several voicings. */
+const addedChords: { key: string; name: string }[] = [];
+let addedSeq = 0;
 
 /**
  * The draggable building blocks under the track: chord chips (the
- * progression's chords, deduped, plus any added by name) and note chips (the
- * 12 pitch classes, colored like every other note in the app). Dragging one
+ * progression's chords, deduped, plus each addition by name). Dragging one
  * onto the track adds an event; the track's drop zones do the geometry.
+ * (Note adding/editing happens by clicking a string lane on the track.)
  */
 function renderBuilders(): void {
-  const tokens = chordTokensFromText(text.value).filter((token) => token !== CHORD_REST);
-  const names = [...new Set([...tokens, ...addedChords])];
+  const streamTokens = [...new Set(chordTokensFromText(source).filter((token) => token !== CHORD_REST))];
   chordChips.replaceChildren(
-    ...names.map((name) => {
+    ...streamTokens.map((name) => {
       const chip = el("button", "builder-chip builder-chord", name) as HTMLButtonElement;
       chip.type = "button";
       chip.title = `Drag ${name} onto a bar in the track`;
-      makeDraggable<DragPayload>(chip, { kind: "new-chord", name });
+      makeDraggable<DragPayload>(chip, { kind: "new-chord", name, shape: null });
       return chip;
     }),
-  );
-  noteChips.replaceChildren(
-    ...Array.from({ length: 12 }, (_, pc) => {
-      const chip = el("button", "builder-chip builder-note", noteLabels(pc)) as HTMLButtonElement;
+    ...addedChords.map((entry) => {
+      const chip = el("button", "builder-chip builder-chord is-pending", `${entry.name} · to add`) as HTMLButtonElement;
       chip.type = "button";
-      chip.style.background = colorFor(pc);
-      chip.title = `Drag a ${noteLabels(pc)} onto a string lane — the app picks the fret`;
-      makeDraggable<DragPayload>(chip, { kind: "new-note", pc });
+      chip.title = `Drag ${entry.name} onto a bar in the track (drags with the voicing you previewed for it)`;
+      makeDraggable<DragPayload>(chip, {
+        kind: "new-chord",
+        name: entry.name,
+        shape: preview.get(entry.key) ?? null,
+        key: entry.key,
+      });
       return chip;
     }),
   );
@@ -385,10 +453,17 @@ chordAddInput.addEventListener("keydown", (event) => {
   if (!name) return;
   try {
     const chord = parseChord(name);
-    if (!addedChords.includes(chord.name)) addedChords.push(chord.name);
+    const entry = { key: `added:${addedSeq++}`, name: chord.name };
+    addedChords.push(entry);
+    // Do NOT add it to the track yet — just flag it as pending so its
+    // voicings can be previewed below. The chip for it is dragged onto a
+    // bar later; the pending preview shape rides with it.
+    pending = entry;
+    pendingBrowse = null;
+    focusPending = true;
     chordAddInput.value = "";
     chordAddInput.classList.remove("is-invalid");
-    renderBuilders();
+    render();
   } catch {
     chordAddInput.classList.add("is-invalid");
     chordAddInput.title = `"${name}" is not a chord the app understands`;
@@ -506,47 +581,167 @@ function renderVoicingPicker() {
     `· ${views.length} chord${views.length === 1 ? "" : "s"}` +
     ` · ${views.filter((v) => v.pinned).length} pinned`;
 
-  tabs.replaceChildren(
-    ...views.map((view) => {
-      const button = el("button", "voicing-tab", view.event.label) as HTMLButtonElement;
+  // The same chord NAME can sit on several bars, and each bar can be
+  // pinned to a DIFFERENT voicing — so the tab says which bar it is,
+  // and only when that name appears more than once (otherwise they
+  // are distinguished just by name).
+  const counts = new Map<string, number>();
+  for (const v of views) counts.set(v.event.label, (counts.get(v.event.label) ?? 0) + 1);
+
+  const tabButtons = views.map((view) => {
+      const duplicate = (counts.get(view.event.label) ?? 0) > 1;
+      const bar = duplicate ? Math.floor(view.event.beat / (plan?.beatsPerBar ?? 4)) + 1 : 0;
+      const label = duplicate ? `${view.event.label} · bar ${bar}` : view.event.label;
+      const button = el("button", "voicing-tab", label) as HTMLButtonElement;
       button.type = "button";
       if (view.index === focusIndex) button.classList.add("is-active");
       if (view.pinned) button.classList.add("is-pinned");
       button.title = view.pinned
-        ? `${view.event.label} is pinned to ${view.shape} — click to browse it`
-        : `${view.event.label} is voiced by the search (${view.shape}) — click to browse it`;
+        ? `${view.event.label}${duplicate ? ` (bar ${bar})` : ""} is pinned to ${view.shape} — click to browse it`
+        : `${view.event.label}${duplicate ? ` (bar ${bar})` : ""} is voiced by the search (${view.shape}) — click to browse it`;
       button.addEventListener("click", () => {
         focusIndex = view.index;
+        focusPending = false;
         render();
       });
       return button;
-    }),
-  );
+    });
+
+  for (const entry of addedChords) {
+    const pill = el("button", "voicing-tab is-pending", `${entry.name} · to add`) as HTMLButtonElement;
+    pill.type = "button";
+    if (focusPending && pending?.key === entry.key) pill.classList.add("is-active");
+    pill.title = "This chord is waiting: browse its voicings, hear it, then drag its chip onto a bar to place it.";
+    pill.addEventListener("click", () => {
+      pending = entry;
+      focusPending = true;
+      render();
+    });
+    tabButtons.push(pill);
+  }
+
+  tabs.replaceChildren(...tabButtons);
+
+  if (pending && focusPending) {
+    const parsed = parseChord(pending.name);
+    const previous = views.length > 0 ? views[views.length - 1] : null;
+    const prevFrets = previous
+      ? previous.list[previous.rank]?.frets ?? previous.event.frets
+      : null;
+    const list = rankGuitarVoicings(
+      parsed.pitchClasses,
+      readTuning(),
+      readInt(fretsInput, 15),
+      readInt(spanInput, 5),
+      prevFrets,
+      readInt(capInput, 400),
+    );
+    const committed = preview.get(pending.key);
+    const chosenShape = pendingBrowse ?? committed ?? list[0]?.shape ?? "";
+    const current = list.find((entry) => entry.shape === chosenShape) ?? list[0];
+
+    const rank = current ? list.findIndex((e) => e.shape === current.shape) : 0;
+    const step = (delta: number) => {
+      const next = Math.min(list.length - 1, Math.max(0, rank + delta));
+      pendingBrowse = list[next].shape;
+      render();
+    };
+    const prevButton = el("button", "voicing-step", "◀") as HTMLButtonElement;
+    prevButton.type = "button";
+    prevButton.disabled = rank === 0;
+    prevButton.addEventListener("click", () => step(-1));
+    const nextButton = el("button", "voicing-step", "▶") as HTMLButtonElement;
+    nextButton.type = "button";
+    nextButton.disabled = rank >= list.length - 1;
+    nextButton.addEventListener("click", () => step(1));
+
+    const hear = el("button", "voicing-play", "▶ Hear it") as HTMLButtonElement;
+    hear.type = "button";
+    hear.addEventListener("click", () => {
+      if (current)
+        playVoicing(current.frets, readTuning(), {
+          strumMs: list[0] && plan ? plan.strumMs : 55,
+          releaseMs: plan?.releaseMs ?? 0,
+        });
+    });
+
+    const useButton = el(
+      "button",
+      "voicing-use",
+      pendingBrowse !== null && pendingBrowse !== committed ? `Use this (${current.shape})` : "Use for the drop",
+    ) as HTMLButtonElement;
+    useButton.type = "button";
+    useButton.title = "The next chip drop pins this shape";
+    useButton.disabled = pendingBrowse === null || pendingBrowse === committed;
+    useButton.addEventListener("click", () => {
+      if (current) preview.set(pending!.key, current.shape);
+      pendingBrowse = null;
+      render();
+    });
+
+    const notes = current
+      ? current.frets
+          .map((fret, s) => (fret === null ? null : midiName(readTuning()[s] + fret)))
+          .filter((n): n is string => n !== null)
+          .join(" ")
+      : "";
+
+    picker.replaceChildren(
+      el("div", "voicing-head", `${pending.name} · ${list.length} voicings · not yet on the track`),
+      el("div", "voicing-shape", current?.shape ?? ""),
+      el("div", "voicing-notes", `${parsed.name} · ${notes}`),
+      (() => {
+        const controls = el("div", "voicing-controls");
+        controls.append(prevButton, nextButton, useButton, hear);
+        return controls;
+      })(),
+      ...(current
+        ? [renderChordDiagram({ frets: current.frets }, readTuning(), noteName, 0)]
+        : []),
+      el(
+        "p",
+        "muted riff-hint",
+        pendingBrowse === null && committed !== undefined && committed === current.shape
+          ? `"${pending.name}" will land with this shape pinned when you drag its chip onto a bar.`
+          : `Previewing — click "Use for the drop" to make this the shape the chip drops with.`,
+      ),
+    );
+    voicingSummary.textContent = `· ${pending.name} waiting to be placed`;
+    return;
+  }
 
   const view = views[focusIndex];
-  const current = view.list[view.rank] ?? { frets: view.event.frets, shape: view.shape, cost: 0 };
+  const base = view.list[view.rank] ?? { frets: view.event.frets, shape: view.shape, cost: 0 };
+  const previewed = preview.get(view.index);
+  const current = previewed === undefined
+    ? base
+    : (view.list.find((entry) => entry.shape === previewed) ?? base);
   const previous = focusIndex > 0 ? views[focusIndex - 1] : null;
   const notes = view.event.notes
     .map((note) => midiName(readTuning()[note.stringIndex] + note.fret))
     .join(" ");
 
+  // Stepping only PREVIEWS: the browsed shape is shown/played but is not
+  // written into the stream, so wandering the list can't silently pin a
+  // shape the ear hasn't approved (the pin happens on "Use this").
   const step = (delta: number) => {
-    const next = Math.min(view.list.length - 1, Math.max(0, view.rank + delta));
-    if (next === view.rank) return;
-    pins[view.index] = { name: view.event.label, shape: view.list[next].shape };
+    const effective = preview.get(view.index) ?? view.shape;
+    const currentRank = view.list.findIndex((entry) => entry.shape === effective);
+    const next = Math.min(view.list.length - 1, Math.max(0, currentRank + delta));
+    preview.set(view.index, view.list[next].shape);
     focusIndex = view.index;
     render();
   };
-
+  const effectiveRank = previewed === undefined ? view.rank : Math.max(0, view.list.findIndex((e) => e.shape === previewed));
   const prevButton = el("button", "voicing-step", "◀") as HTMLButtonElement;
   prevButton.type = "button";
-  prevButton.disabled = view.rank === 0;
+  prevButton.disabled = effectiveRank === 0;
   prevButton.title = "Previous voicing (smoother hand movement)";
   prevButton.addEventListener("click", () => step(-1));
 
   const nextButton = el("button", "voicing-step", "▶") as HTMLButtonElement;
   nextButton.type = "button";
-  nextButton.disabled = view.rank === view.list.length - 1;
+  nextButton.disabled = effectiveRank === view.list.length - 1;
   nextButton.title = "Next voicing (smoother hand movement)";
   nextButton.addEventListener("click", () => step(1));
 
@@ -556,20 +751,38 @@ function renderVoicingPicker() {
   // thin tail. This is the way back to the top of the list in one click.
   const bestButton = el("button", "voicing-best", "best ▲") as HTMLButtonElement;
   bestButton.type = "button";
-  bestButton.disabled = view.rank === 0;
+  bestButton.disabled = effectiveRank === 0;
   bestButton.title = "Jump to the top of the list: the smoothest, fullest option";
   bestButton.addEventListener("click", () => {
-    pins[view.index] = { name: view.event.label, shape: view.list[0].shape };
+    preview.set(view.index, view.list[0].shape);
     focusIndex = view.index;
     render();
   });
 
-  const autoButton = el("button", "voicing-auto", view.pinned ? "Auto (unpin)" : "Auto") as HTMLButtonElement;
+  // The commit button: browser-stepping and "best" only PREVIEW. Writing
+  // the browsed shape into the chord stream is an explicit choice (the
+  // pin), so a careless ◀ ▶ can't silently replace the ring of chords
+  // with a shape the ear hasn't approved. It is disabled only when there
+  // is nothing SO DIFFERENT to pin (no preview, or the preview is the
+  // pinned/auto shape already).
+  const useButton = el("button", "voicing-use", previewed !== undefined && previewed !== view.shape ? `Use this (${current.shape})` : "Use this") as HTMLButtonElement;
+  useButton.type = "button";
+  useButton.disabled = previewed === undefined || previewed === view.shape;
+  useButton.title = "Pin this exact shape for this chord; other chords re-optimize around it";
+  useButton.addEventListener("click", () => {
+    pins[view.index] = { name: view.event.label, shape: current.shape };
+    preview.delete(view.index);
+    focusIndex = view.index;
+    render();
+  });
+
+  const autoButton = el("button", "voicing-auto", view.pinned || previewed !== undefined ? "Auto (unpin/unpreview)" : "Auto") as HTMLButtonElement;
   autoButton.type = "button";
-  autoButton.disabled = !view.pinned;
+  autoButton.disabled = !view.pinned && previewed === undefined;
   autoButton.title = "Hand this chord back to the voicing search";
   autoButton.addEventListener("click", () => {
     pins[view.index] = null;
+    preview.delete(view.index);
     focusIndex = view.index;
     render();
   });
@@ -596,14 +809,16 @@ function renderVoicingPicker() {
   const deeper = view.list
     .slice(0, view.rank)
     .filter((entry) => entry.sounded > current.sounded).length;
-  const hint = deeper > 0
-    ? `The search picked a ${current.sounded}-string shape; ${deeper} fuller voicing${deeper === 1 ? "" : "s"} rank above it. "best ▲" jumps straight there, then ◀ ▶ walks the list.`
-    : view.pinned
-      ? "Pinned: this is the exact shape that plays, and the chords after it were re-chosen around it."
-      : "Auto: the search picked this, and it is already the fullest smooth option from the previous chord.";
+  const hint = previewed !== undefined
+    ? `Previewing ${current.shape} — nothing is played until you click "Use this"; 'Auto' stops previewing.`
+    : deeper > 0
+      ? `The search picked a ${current.sounded}-string shape; ${deeper} fuller voicing${deeper === 1 ? "" : "s"} rank above it. "best ▲" jumps straight there, then ◀ ▶ walks the list.`
+      : view.pinned
+        ? "Pinned: this is the exact shape that plays, and the chords after it were re-chosen around it."
+        : "Auto: the search picked this, and it is already the fullest smooth option from the previous chord.";
 
   const controls = el("div", "voicing-controls");
-  controls.append(prevButton, nextButton, bestButton, autoButton, playButtonOne);
+  controls.append(prevButton, nextButton, bestButton, useButton, autoButton, playButtonOne);
 
   picker.replaceChildren(
     head,
@@ -626,7 +841,7 @@ function refresh(): Riff | null {
   let riff: Riff;
   const tuning = readTuning();
   try {
-    riff = parseRiff(text.value, {
+    riff = parseRiff(source, {
       tuning,
       maxFrets: readInt(fretsInput, 15),
       span: readInt(spanInput, 5),
@@ -647,8 +862,7 @@ function refresh(): Riff | null {
   }
   setError(null);
   plan = riff;
-  syncTabEditor();
-  syncProgressionInput();
+  if (!notesViewDirty) text.value = splitChordLine(source).rest;
   renderBuilders();
 
   const bars = riff.totalBeats / riff.beatsPerBar;
@@ -659,8 +873,8 @@ function refresh(): Riff | null {
     (riff.strumMs > 0 ? ` · strum ${riff.strumMs} ms` : " · blocked") +
     (riff.releaseMs > 0 ? ` · release ${riff.releaseMs} ms` : "");
 
-  const tuningNow = readTuning();
   const loop = loopWindow(riff);
+  const tuningNow = readTuning();
   const playEvents = (indices: number[]) => {
     for (const index of indices) {
       const event = riff.events[index];
@@ -692,10 +906,17 @@ function refresh(): Riff | null {
   });
   output.appendChild(reading);
 
+  // Bars that fit in the track's box width (== one column per step column of
+  // 2rem, read from the CSS var so the wrap maths follows the stylesheet).
+  const stepPx = parseFloat(getComputedStyle(document.documentElement).fontSize || "16") * 2;
+  const trackColsPx = Math.max(320, trackEl.clientWidth || 900) / stepPx;
+  const barsPerRow = Math.max(1, Math.floor(trackColsPx / (riff.beatsPerBar / riff.stepBeats)));
+
   // Unified track view: regions + lanes + playhead, draggable onto itself.
   const track = renderTrack(riff, {
     tuning: tuningNow,
     loop,
+    barsPerRow,
     onPlayEvent: (index) => playEvents([index]),
     moves: {
       // A chord drop writes through the progression input (the live view of
@@ -704,11 +925,11 @@ function refresh(): Riff | null {
       // positional in TOKENS — tokenIndexForChordOrdinal bridges them.
       onMoveChord: (index, bar) => {
         const ordinal = riff.events.slice(0, index + 1).filter((e) => e.kind === "chord").length - 1;
-        const tokens = chordTokensFromText(text.value);
+        const tokens = chordTokensFromText(source);
         const from = tokenIndexForChordOrdinal(tokens, ordinal);
         if (from < 0 || from === bar) return;
-        progressionInput.value = moveChordToken(tokens, from, bar).join(" ");
-        applyProgression();
+        pins = movePins(pins, tokens, from, bar);
+        applyProgression(moveChordToken(tokens, from, bar));
       },
       // A note drop edits the overlay lanes (same machinery as the tab
       // editor's cells), which regenerates the lane text.
@@ -720,18 +941,32 @@ function refresh(): Riff | null {
         if (!moveLaneNote(lanes, { string: from.string, column }, to)) return;
         updateTabLanes(lanes);
       },
-      // A chord chip dropped on a bar: same write path as a chord move.
-      onAddChord: (bar, name) => {
-        const tokens = chordTokensFromText(text.value);
-        progressionInput.value = addChordToken(tokens, bar, name).join(" ");
-        applyProgression();
+      // A chord chip dropped on a bar: same write path as a chord move. If
+      // the chip's voicing was previewed, the bar is pinned to it.
+      onAddChord: (bar, name, shape, key) => {
+        const tokens = chordTokensFromText(source);
+        const next = addChordToken(tokens, bar, name);
+        if (shape) {
+          pins = insertOrReplacePin(pins, tokens, bar, { name, shape });
+        }
+        applyProgression(next);
+        if (key) {
+          const at = addedChords.findIndex((e) => e.key === key);
+          if (at >= 0) addedChords.splice(at, 1);
+          preview.delete(key);
+          if (pending?.key === key) {
+            pending = null;
+            pendingBrowse = null;
+            focusPending = false;
+          }
+        }
       },
-      // A note chip dropped on a lane: the user thinks in pitch classes,
-      // the app answers in frets (fretForPitchClass, current tuning).
-      onAddNote: (pc, to) => {
+      // Type a fret number onto a string/beat: the track's lane clicks land
+      // here. An empty entry DELETES whatever note sat there.
+      onSetNote: (to, fret) => {
         const lanes = buildOverlay(riff);
-        const fret = fretForPitchClass(pc, tuningNow[to.string]);
-        if (!setLaneNote(lanes, to, fret)) return;
+        const ok = fret === null ? clearLaneNote(lanes, to) : setLaneNote(lanes, to, fret);
+        if (!ok) return;
         updateTabLanes(lanes);
       },
     },
@@ -749,18 +984,31 @@ function render() {
 
 text.addEventListener("input", () => {
   stop();
+  notesViewDirty = true;
   // Re-voicing the whole chord stream per keystroke is wasted work, and error
   // text that updates per character fights the typing.
   window.clearTimeout(editTimer);
-  editTimer = window.setTimeout(() => refresh(), RIFF_EDIT_MS);
-});
-
-// The progression input is a convenience over editing the chord line directly:
-// it formats chords into the notation with the bar-ruler alignment done for you.
-progressionInput.addEventListener("input", () => {
-  stop();
-  window.clearTimeout(editTimer);
-  editTimer = window.setTimeout(applyProgression, RIFF_EDIT_MS);
+  editTimer = window.setTimeout(() => {
+    const { chordLine } = splitChordLine(source);
+    const candidate = chordLine === null ? text.value : withChordLine(text.value, chordLine);
+    try {
+      parseRiff(candidate, {
+        tuning: readTuning(),
+        maxFrets: readInt(fretsInput, 15),
+        span: readInt(spanInput, 5),
+        cap: readInt(capInput, 400),
+        defaultStrumMs: DEFAULT_CONFIG.strum.guitarMs,
+        pins: pins.filter((pin): pin is VoicingPin => pin !== null),
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return; // keep the last good source and the box as typed
+    }
+    source = candidate;
+    notesViewDirty = false;
+    setError(null);
+    refresh();
+  }, RIFF_EDIT_MS);
 });
 
 // These re-plan: they change what the chord stream is voiced into.
@@ -791,7 +1039,13 @@ for (const input of [scaleInput, loopStartInput, loopEndInput]) {
   });
 }
 
-// Tool tab switching (Chords / Tab / Text / Settings over one notation)
+// Tool tab switching (Chords / Text / Settings over one notation)
+let resizeTimer = 0;
+window.addEventListener("resize", () => {
+  window.clearTimeout(resizeTimer);
+  resizeTimer = window.setTimeout(() => refresh(), 150);
+});
+
 const toolTabs = document.querySelectorAll<HTMLButtonElement>(".fingering-tab");
 const toolPanels = document.querySelectorAll<HTMLElement>(".fingering-panel");
 toolTabs.forEach((tab) => {

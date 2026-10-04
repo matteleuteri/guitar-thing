@@ -68,9 +68,17 @@ header p { color: var(--muted); max-width: 70ch; margin-top: .25rem; }
   font-size: .82rem;
   --riff-box-pad: .6rem;
 }
+.riff-box {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+}
 #riff-text {
   flex: 1;
   min-width: 18rem;
+  width: 100%;
+  box-sizing: border-box;
   line-height: 1.45;
   padding: .5rem var(--riff-box-pad);
   border-radius: 6px;
@@ -266,9 +274,11 @@ header p { color: var(--muted); max-width: 70ch; margin-top: .25rem; }
 .track {
   --track-step: 2rem;
   --track-ruler-h: 1.6rem;
-  overflow-x: auto;
   margin-top: .5rem;
   position: relative;
+  /* Systems stack vertically once the riff wraps to a second row. */
+  display: grid;
+  gap: 1.2rem;
   /* NO container padding: the scrollbar spans the whole element, so any
      padding sits between the scrollbar and the canvas and the two read as
      misaligned (the user measured it by eye). The space before the music is
@@ -285,6 +295,19 @@ header p { color: var(--muted); max-width: 70ch; margin-top: .25rem; }
 .track-canvas {
   position: relative;
   width: calc(var(--track-cols) * var(--track-step));
+  overflow-x: auto;
+}
+.track-fret-input {
+  position: absolute;
+  z-index: 5;
+  width: 4.5rem;
+  padding: .15rem .35rem;
+  background: var(--panel-2);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  font-size: .8rem;
 }
 .track-bar-track {
   position: relative;
@@ -318,21 +341,39 @@ header p { color: var(--muted); max-width: 70ch; margin-top: .25rem; }
 .track-chord-lane {
   height: 2.1rem;
 }
-/* The string letter pins to the visible left edge while scrolling (sticky),
-   on an opaque chip so regions slide cleanly under it. */
-.track-lane-letter {
+.track-system {
+  display: flex;
+  align-items: stretch;
+}
+/* The string-name gutter sits LEFT of the canvas, outside the note area, so
+   regions never slide under the labels. Each row mirrors the canvas row at
+   the same height (ruler / chord lane / one per string), so the letters line
+   up with their lanes. Sticky at the left edge while the page scrolls
+   horizontally. */
+.track-gutter {
   position: sticky;
   left: 0;
-  z-index: 2;
-  display: inline-block;
-  width: 1.2rem;
-  line-height: inherit;
-  text-align: center;
+  z-index: 3;
+  flex: 0 0 1.4rem;
+  background: var(--bg);
   font-family: ui-monospace, monospace;
+}
+.track-gutter-ruler {
+  height: var(--track-ruler-h);
+  border-bottom: 1px solid rgba(255, 255, 255, .08);
+}
+.track-gutter-chord {
+  height: 2.1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, .05);
+}
+.track-gutter-letter {
+  height: 1.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, .05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: .7rem;
   color: var(--muted);
-  background: var(--bg);
-  height: 100%;
 }
 /* A region's LEFT edge is its start beat and its width is its span — no
    centering. The playhead touches the left edge at the moment it sounds. */

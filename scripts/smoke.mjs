@@ -397,15 +397,13 @@ const riffOpts = { tuning: STANDARD, maxFrets: 15, span: 5, cap: 200 };
   // A LEADING space is column 0, not decoration.
   const indented = parseRiff("e| --5--5--|\nB| --3--5--|", riffOpts);
   check(indented.events[0].beat === 1.5, `a leading space is a rest column (beat ${indented.events[0].beat})`);
-  // ...and a width mismatch is still the error it was, now with the fix in it.
-  let msg = "";
-  try {
-    parseRiff("e|-- 5 5 7 -|\nB|-- 3 5 -|", riffOpts);
-  } catch (err) {
-    msg = err.message;
-  }
-  check(/different lengths \(8, 10 columns\)/.test(msg), `spaced lanes of different widths throw (${msg || "no error!"})`);
-  check(/pad the short lanes/.test(msg), "the lane-length error says how to fix it");
+  // ...and a width mismatch is padded with a warning now (two-digit frets
+  // made this natural), still naming the columns involved.
+  const padded = parseRiff("e|-- 5 5 7 -|\nB|-- 3 5 -|", riffOpts);
+  check(
+    padded.warnings.some((w) => /lane "B"/.test(w) && /8/.test(w) && /10/.test(w)),
+    `a width mismatch pads the short lane with a warning naming the sizes (${padded.warnings.join("; ") || "no warning!"})`,
+  );
   // A lane with no closing pipe used to fall through to the chord stream and
   // die as `Unknown chord "e"`, which points at the wrong thing entirely.
   let unclosed = "";
@@ -453,7 +451,6 @@ const riffOpts = { tuning: STANDARD, maxFrets: 15, span: 5, cap: 200 };
 }
 
 // --- validation ---
-throws(() => parseRiff("e|--5--|\nB|--3-|", riffOpts), "tab: mismatched lane lengths throw");
 throws(() => parseRiff("e|--5-zz-|", riffOpts), "tab: junk cell throws");
 throws(() => parseRiff("nope 5", riffOpts), "chord: unparseable chord throws");
 throws(() => parseRiff("tempo", riffOpts), "directive: missing number throws");
@@ -585,14 +582,12 @@ throws(() => parseRiff("# only a comment", riffOpts), "empty riff throws");
   check(slash.events.length === 2, `a trailing // comment works too (${slash.events.length} chords)`);
   const whole = parseRiff("# just a heading\nC G", { tuning: STANDARD, maxFrets: 24, span: 5 });
   check(whole.events.length === 2, "a whole-line comment is ignored");
-  // The lane-length error is the one a user hits most, so keep its wording.
-  let laneMsg = "";
-  try {
-    parseRiff("e|5--5--|\nB|5--|", { tuning: STANDARD, maxFrets: 24, span: 5 });
-  } catch (err) {
-    laneMsg = err.message;
-  }
-  check(/different lengths/.test(laneMsg), `mismatched lanes are rejected clearly (${laneMsg || "no error!"})`);
+  // The lane-width warning is the one a user hits most, so keep it loud.
+  const padded = parseRiff("e|5--5--|\nB|5--|", { tuning: STANDARD, maxFrets: 24, span: 5 });
+  check(
+    padded.warnings.some((w) => /lane "B"/.test(w) && /padded/.test(w)),
+    `mismatched lanes pad the short one with a warning (${padded.warnings.join("; ") || "no warning!"})`,
+  );
 }
 
 // ---- The notation we SHIP must parse. ----
@@ -627,14 +622,14 @@ throws(() => parseRiff("# only a comment", riffOpts), "empty riff throws");
     "the Pages workflow copies riff.html (otherwise the live riff builder 404s)",
   );
 
-  // ---- The tool tab strip (Chords / Tab / Text / Settings). ----
+  // ---- The tool tab strip (Chords / Text / Settings). ----
   // Pure DOM wiring, invisible to the Node tests, so assert its shape here.
   {
     const styleCss = await readFile(new URL("../style.css", import.meta.url), "utf8");
     const riffMain = await readFile(new URL("../dist/riff-main.js", import.meta.url), "utf8");
     const tabs = [...riffPage.matchAll(/data-tool="(\w+)"/g)].map((m) => m[1]);
     const panels = [...riffPage.matchAll(/data-tool-panel="(\w+)"/g)].map((m) => m[1]);
-    check(tabs.length === 4, `riff.html has four tool tabs (${tabs.join(", ")})`);
+    check(tabs.length === 3, `riff.html has three tool tabs (${tabs.join(", ")})`);
     check(
       JSON.stringify([...tabs].sort()) === JSON.stringify([...panels].sort()),
       `every tool tab has exactly one panel (tabs: ${tabs}; panels: ${panels})`,
@@ -655,7 +650,7 @@ throws(() => parseRiff("# only a comment", riffOpts), "empty riff throws");
     );
     // The visual tab editor must exist exactly once (it used to live in two
     // panels at the same id, so the Tab panel was always empty).
-    check((riffPage.match(/id="tab-editor"/g) ?? []).length === 1, "one #tab-editor in riff.html");
+    check(!/id="tab-editor"/.test(riffPage), "the redundant click-grid tab editor is gone from riff.html");
   }
   if (shipped) {
     const text = shipped[1].replace(/^\s*\n/, "").replace(/\s+$/, "");

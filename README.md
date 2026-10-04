@@ -86,9 +86,7 @@ bounds, an optional metronome and count-in, and a track view — DAW-style
 regions that show what plays when and for how long — you can click to
 audition single events. The track
 re-plans as you type, and **Play ▶** always plays what is in the box.
-Playback opens with a one-beat pause — the playhead sweeps the empty first
-beat (a click, if the metronome is on) so you can settle before the first
-note lands. Regions also **drag**: pull a chord onto another bar (the bar
+Regions also **drag**: pull a chord onto another bar (the bar
 it left becomes a `-` rest — see below) or a note onto another string or
 column, and the notation rewrites itself.
 
@@ -161,8 +159,10 @@ directive can carry a trailing `#` comment.
 
 Tab lanes are `e B G D A E` (high `e` first, as you read them); **every character
 is one column**, so in each column `-` `.` `_` or a plain space is a rest, `x`
-mutes, and a number is a fret (two digits occupy two columns). All lanes must be
-the same character width, so pad the short ones with dashes or spaces.
+mutes, and a number is a fret (two digits occupy two columns). If lanes end up
+different character widths (a two-digit fret makes its lane a column longer), the
+short ones are padded with rests and a warning is shown — events stay on the
+columns where they were written.
 Frequencies come from the current tuning, so this works with a custom tuning too.
 
 ## Note selection

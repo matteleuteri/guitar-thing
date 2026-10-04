@@ -313,14 +313,23 @@ export function parseRiff(text: string, options: RiffOptions): Riff {
 
   const widths = new Set([...lanes.values()].map((cells) => cells.length));
   if (widths.size > 1) {
-    const listed = [...widths].sort((a, b) => a - b).join(", ");
-    // The counts are CHARACTERS, so the fix is to pad the short lanes with
-    // dashes or spaces to the same width — say so, it is the commonest error.
-    throw new Error(
-      `Tab lanes have different lengths (${listed} columns). Every character counts as one column, so pad the short lanes with "-" or spaces to the same width.`,
-    );
+    // Friendlier than a hard error: a short lane is padded with rests (every
+    // character counts as one column, so this is what the player MEANT most of
+    // the time). Say so per lane — and this is the usual cause: a two-digit
+    // fret made that lane one column longer than its neighbours, so the others
+    // each need one dash.
+    const longest = Math.max(...widths);
+    for (const [stringIndex, cells] of lanes) {
+      if (cells.length < longest) {
+        warnings.push(
+          `Tab lane "${STRING_LETTERS[5 - stringIndex]}" was ${cells.length} columns, padded to ${longest} with rests. Every character counts as one column.`,
+        );
+        while (cells.length < longest) cells.push(null);
+      }
+    }
   }
-  const columns = widths.size === 1 ? [...widths][0] : 0;
+  const columns =
+    lanes.size === 0 ? 0 : Math.max(...[...lanes.values()].map((cells) => cells.length));
   if (columns === 0 && chordTokens.every((token) => token === "-")) {
     throw new Error("Nothing to play: add a chord (C Am F G) or a tab lane (e|--5--5--|).");
   }
@@ -343,11 +352,11 @@ export function parseRiff(text: string, options: RiffOptions): Riff {
     // later chords keep their positions. (It exists so a chord can be dragged
     // off its bar on the track: the stream is positional — a chord's bar is
     // its token index — so replacing a chord without a rest token would
-    // silently shift every chord between the two bars.) A TRAILING rest
-    // extends nothing: totalBeats is event-driven, so silence past the last
-    // event is not rendered. Pins stay aligned with chord EVENTS (rests are
-    // not chords), so inserting a rest before a pinned chord does not shift
-    // the pin.
+    // silently shift every chord between the two bars.) A TRAILING rest is
+    // still a bar: totalBeats counts chord tokens too, so silence past the
+    // last event shows as empty grid (that is what a "+ 4 bars" write-out
+    // extends). Pins stay aligned with chord EVENTS (rests are not chords),
+    // so inserting a rest before a pinned chord does not shift the pin.
     const parsed: ParsedChord[] = [];
     const barOfChord: number[] = [];
     chordTokens.forEach((token, bar) => {
@@ -431,7 +440,11 @@ export function parseRiff(text: string, options: RiffOptions): Riff {
   events.sort((a, b) => a.beat - b.beat || (a.kind === "chord" ? -1 : 1));
 
   const lastEvent = Math.max(...events.map((event) => event.beat + event.beats));
-  const totalBeats = Math.ceil(Math.max(lastEvent, columns * stepBeats) / beatsPerBar) * beatsPerBar;
+  // The grid is as wide as the latest of: the last sounding event, the tab
+  // lanes as written, or the chord stream's bars (which include rest bars).
+  const totalBeats = Math.ceil(
+    Math.max(lastEvent, columns * stepBeats, chordTokens.length * beatsPerBar) / beatsPerBar,
+  ) * beatsPerBar;
 
   return {
     bpm,
