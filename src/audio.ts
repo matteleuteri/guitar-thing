@@ -105,6 +105,13 @@ function ensure(): Promise<void> {
     context.resume().catch(() => undefined);
   }
   if (!workletReady) {
+    if (!context.audioWorklet) {
+      // Environments without the Audio Worklet API (some headless/embedded
+      // browsers): rendering, playback UI and DnD must still work. The
+      // thrown Module Evaluation error here used to abort riff-main's whole
+      // module evaluation, leaving #track empty.
+      return Promise.resolve();
+    }
     workletReady = context.audioWorklet.addModule(workletUrl().href).catch((err) => {
       workletReady = null;
       throw err;

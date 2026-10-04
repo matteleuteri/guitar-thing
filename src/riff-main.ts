@@ -271,6 +271,9 @@ const preview = new Map<number | string, string>();
 /** Which chord of the stream the picker is showing. */
 let focusIndex = 0;
 let plan: Riff | null = null;
+/** The bar count from the last successful parse — a change means a new piece,
+ *  so the loop window resets to the whole riff (see refresh). */
+let lastBarsTotal = 0;
 let timelineEl: HTMLElement | null = null;
 let readingOpen: boolean | null = null;
 let transport: RiffTransport | null = null;
@@ -482,8 +485,7 @@ function start() {
   void primeAudio();
   const riff = refresh();
   if (!riff) return;
-  loopStartInput.max = String(Math.max(1, Math.ceil(riff.totalBeats / riff.beatsPerBar)));
-  loopEndInput.max = loopStartInput.max;
+
   const next = new RiffTransport(riff, secondsPerBeat(riff, speed()), {
     onEvent: (event, when) => playEvent(event, when),
     onClick: (_beat, when, isDownbeat) => playClick(when, isDownbeat),
@@ -864,6 +866,19 @@ function refresh(): Riff | null {
   plan = riff;
   if (!notesViewDirty) text.value = splitChordLine(source).rest;
   renderBuilders();
+
+  const barsTotal = Math.max(1, Math.ceil(riff.totalBeats / riff.beatsPerBar));
+  loopStartInput.max = String(barsTotal);
+  loopEndInput.max = String(barsTotal);
+  // A new bar count means a new piece: reset the loop to the whole riff,
+  // otherwise a riff that grew gets clipped to whatever stale loop was left
+  // (the default "Loop to bar 4" silently plays only the first row). A same-
+  // length edit keeps the user's loop numbers.
+  if (barsTotal !== lastBarsTotal) {
+    lastBarsTotal = barsTotal;
+    loopStartInput.value = "1";
+    loopEndInput.value = String(barsTotal);
+  }
 
   const bars = riff.totalBeats / riff.beatsPerBar;
   const noteCount = riff.events.reduce((sum, event) => sum + event.notes.length, 0);

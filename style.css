@@ -512,6 +512,11 @@ header p { color: var(--muted); max-width: 70ch; margin-top: .25rem; }
   border-left: 1px solid rgba(76, 194, 255, .35);
   border-right: 1px solid rgba(76, 194, 255, .35);
   z-index: 0;
+  /* The loop shading is a VIEWING aid only: its overlay sits exactly on top
+     of the lanes, and without this it eats every dragover/drop on the bars
+     it covers (drop zones hear nothing — the events never reach them). When
+     the loop covers a new bar section, that row goes dead. */
+  pointer-events: none;
 }
 .track-playhead {
   position: absolute;
