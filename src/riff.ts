@@ -331,7 +331,11 @@ export function parseRiff(text: string, options: RiffOptions): Riff {
   const columns =
     lanes.size === 0 ? 0 : Math.max(...[...lanes.values()].map((cells) => cells.length));
   if (columns === 0 && chordTokens.every((token) => token === "-")) {
-    throw new Error("Nothing to play: add a chord (C Am F G) or a tab lane (e|--5--5--|).");
+    // An explicit clear (a rest-only chord line and every lane a rest) keeps
+    // the GRID — the user asked for an empty track, not for it to vanish. So
+    // a fully-rest input parses to zero events with a warning instead of
+    // being thrown out by the converter.
+    warnings.push("Nothing to play: add a chord (C Am F G) or a tab lane (e|--5--5--|).");
   }
 
   const stringCount = options.tuning.length;
@@ -432,7 +436,12 @@ export function parseRiff(text: string, options: RiffOptions): Riff {
   }
 
   if (events.length === 0) {
-    throw new Error("No playable notes: every tab column was a rest or past the last fret.");
+    // A fully-cleared track parses to zero events with a warning (see the
+    // all-rest note above) so the empty grid stays on screen; a play then
+    // schedules nothing but keeps the loop alive.
+    if (!warnings.some((w) => w.startsWith("Nothing to play"))) {
+      warnings.push("Nothing to play: add a chord (C Am F G) or a tab lane (e|--5--5--|).");
+    }
   }
 
   // By beat; a chord and a tab note landing on the same beat BOTH play (a stab

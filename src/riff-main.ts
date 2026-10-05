@@ -234,7 +234,35 @@ function lanesOf(value: string): string[] {
   return value.match(/^\s*[eBGDAE]\s*\|[^|]*\|/gm) ?? [];
 }
 
+function clearTrack(): void {
+  const riff = plan;
+  if (!riff) return;
+  const { chordLine, rest } = splitChordLine(source);
+  // Keep the bar grid: every chord becomes a rest bar and every lane cell a
+  // rest — same shape of track, nothing on it.
+  const tokens = chordTokensFromText(source);
+  const nextChordLine =
+    chordLine === null ? null : formatChordLine(tokens.map(() => CHORD_REST), riff.beatsPerBar, riff.stepBeats);
+  const nextRest = lanesOf(rest).length
+    ? rest.replace(/^(\s*[eBGDAE]\s*\|)([^|]*)\|/gm, (_m, head: string, body: string) => `${head}${"-".repeat(body.length)}|`)
+    : rest;
+  const next = nextChordLine === null ? nextRest : withChordLine(nextRest, nextChordLine);
+  if (next === source) return;
+  pushUndo();
+  source = next;
+  notesViewDirty = false;
+  // The pins were aligned to chord events that no longer exist.
+  pins = [];
+  preview.clear();
+  stop();
+  // The chord line is stripped from the visible box (the box mirrors the tab
+  // lanes); do the same after clearing so nothing stale stays in front.
+  text.value = splitChordLine(source).rest;
+  refresh();
+}
+
 document.getElementById("riff-add-bars")?.addEventListener("click", addFourBars);
+document.getElementById("riff-clear")?.addEventListener("click", clearTrack);
 
 // The kit label is set after `preloadGuitarEngine` above, which may already have
 // restored a stored choice, so it must be read rather than assumed.
@@ -857,6 +885,7 @@ function refresh(): Riff | null {
     grid.replaceChildren();
     plan = null;
     timelineEl = null;
+    trackEl.replaceChildren();
     output.replaceChildren();
     tabs.replaceChildren();
     picker.replaceChildren();

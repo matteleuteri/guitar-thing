@@ -211,8 +211,10 @@ test("a multi-note event never puts two notes on one string", () => {
   }
 });
 
-test("an empty box is refused with an example, not a stack trace", () => {
-  assert.throws(() => parse(""), (err) => /nothing to play/i.test(err.message) && /\|/.test(err.message));
+test("an empty box yields an empty riff with the same guidance as a warning", () => {
+  const riff = parse("");
+  assert.equal(riff.events.length, 0);
+  assert.ok(riff.warnings.some((w) => /nothing to play/i.test(w) && /\|/.test(w)));
 });
 
 // --- rest bars (`-` in the chord stream) ---
@@ -233,8 +235,11 @@ test("a trailing rest is still an empty bar (totalBeats counts chord tokens)", (
   assert.equal(riff.totalBeats, 16, "silence past the last event still shows as grid");
 });
 
-test("a stream of only rests is refused like an empty box", () => {
-  assert.throws(() => parse("tempo 96\n- - -"), /nothing to play/i);
+test("a stream of only rests is an empty but valid riff (the grid stays)", () => {
+  const riff = parse("tempo 96\n- - -");
+  assert.equal(riff.events.length, 0);
+  assert.equal(riff.totalBeats, 12, "the three chord bars still take their space");
+  assert.ok(riff.warnings.some((w) => /nothing to play/i.test(w)));
 });
 
 test("a rest bar still counts as a bar beside the tab lanes", () => {

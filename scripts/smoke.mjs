@@ -455,7 +455,10 @@ throws(() => parseRiff("e|--5-zz-|", riffOpts), "tab: junk cell throws");
 throws(() => parseRiff("nope 5", riffOpts), "chord: unparseable chord throws");
 throws(() => parseRiff("tempo", riffOpts), "directive: missing number throws");
 throws(() => parseRiff("wibble 5", riffOpts), "directive: misspelled keyword throws");
-throws(() => parseRiff("# only a comment", riffOpts), "empty riff throws");
+{
+  const r = parseRiff("# only a comment", riffOpts);
+  check(r.events.length === 0 && r.totalBeats === 0 && r.warnings.length === 1, "an empty box parses as an empty (rendererable) riff");
+}
 {
   const r = parseRiff("e|5 30 5|", riffOpts);
   check(r.warnings.length === 1 && r.events.length === 2, "tab: a fret past the last fret is skipped with a warning");
