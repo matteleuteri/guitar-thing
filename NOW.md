@@ -1,7 +1,7 @@
 # NOW.md — where the riff trainer stands
 
 **Written:** Oct 1 2026, for picking this up later. Updated Oct 3 2026.
-**Branch:** `main` — 1 commit ahead of `origin/main`, **unpushed**.
+**Branch:** `main` — 4 commits ahead of `origin/main`, **unpushed**.
 
 > Design detail lives in `AGENTS.md` ("In flight" at the top, then "Riff
 > trainer"). User-facing docs in `README.md`. This file is only "where we are
@@ -24,8 +24,8 @@ section of the page.
 
 | | |
 |---|---|
-| Branch | `main`, 1 commit ahead of `origin/main`, **unpushed** |
-| Working tree | Clean — `HEAD` holds the pin-alignment fix, no lead-in beat, and the left gutter |
+| Branch | `main`, 4 commits ahead of `origin/main`, **unpushed** |
+| Working tree | Clean — loop overlay drop fix, Clear track, pending-chip retirement order, retuned default are all in |
 | Gate | `npm test` → **ALL PASS** (smoke + audio-sched + 87 unit tests) |
 | Sound | **Ear-approved** — last playback "sounded good" (smplr kit) |
 | Track view / drag / tool tabs in a browser | **Verified by the user.** |
@@ -75,10 +75,16 @@ pending-chord "Use" button no longer grays out after ◀ ▶ (browse and
 commit are separate state), the lead-in beat is gone (`LEAD_IN_BEATS = 0`),
 and the string names live in a sticky left gutter outside the track canvas.
 
+**Oct 4-5 2026 (four unpushed commits on `main`):**
+- `4396bb1` — `.track-loop` no longer swallows dragover/drop (pointer-events: none): drops on newly-added bars were dead because the loop overlay ate the events. Also loop inputs reset to the whole riff when the bar count changes (previously a longer riff silently clipped its loop), and `ensure()` in audio.ts no longer dies on browsers without the Audio Worklet API.
+- `1831f92` — **Clear track** button (`riff.html` + `src/riff-main.ts`): every chord token becomes a rest bar, every lane cell a rest at the same widths; pins/preview reset; `parseRiff` no longer throws on a rest-only stream — it returns a valid zero-event riff with a "Nothing to play" warning, so the empty grid remains visible (previously the error path also left a stale track on screen).
+- `cbba5e9` — pending entry retired BEFORE `applyProgression`, so dragging the pending "to add" chip onto the track no longer leaves the chip in the builder (the rebuild had already run on the un-spliced list).
+- `e06ce70` — shipped default retuned **+2 semitones**: `D Bm G A` with every tab fret nudged 2 up per string (the `8---8---` becomes `10--10--`). README/AGENTS/debug text updated.
+
 ## Next up (pick one)
 
 1. Push `main` to deploy (hard-refresh after — Pages' 10-minute module
-   cache). One commit sits unpushed on `main`.
+   cache). Four commits sit unpushed on `main`: `4396bb1`, `1831f92`, `cbba5e9`, `e06ce70`.
 2. **Dead code**: `renderRiffTimeline`/`setRiffPlayhead` have no live
    caller, and `smoke.mjs` still guards the old timeline's source shape —
    repoint or delete.

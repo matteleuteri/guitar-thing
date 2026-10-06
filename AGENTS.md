@@ -411,7 +411,8 @@ event, bar preserved — positions are token indices); it exists so a chord
 dragged off its bar leaves an empty bar instead of shifting every chord
 after it. A trailing rest is still a bar (`totalBeats` counts chord tokens
 as well as lane width), a
-rest-only stream is refused like an empty box, and pins are aligned with
+rest-only stream renders as a valid zero-event riff with a warning
+(so Clear track keeps the grid visible), and pins are aligned with
 chord EVENTS so a rest never shifts them.
 
 **The bar ruler is the shared axis (`renderRiffGrid`), and it is aligned in
