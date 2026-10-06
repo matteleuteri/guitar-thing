@@ -993,7 +993,9 @@ function refresh(): Riff | null {
         if (shape) {
           pins = insertOrReplacePin(pins, tokens, bar, { name, shape });
         }
-        applyProgression(next);
+        // Retire the pending entry BEFORE applyProgression: refresh() rebuilds
+        // the chip row from addedChords, so splicing after it would leave the
+        // "to add" chip on screen until the next refresh — the reported bug.
         if (key) {
           const at = addedChords.findIndex((e) => e.key === key);
           if (at >= 0) addedChords.splice(at, 1);
@@ -1004,6 +1006,7 @@ function refresh(): Riff | null {
             focusPending = false;
           }
         }
+        applyProgression(next);
       },
       // Type a fret number onto a string/beat: the track's lane clicks land
       // here. An empty entry DELETES whatever note sat there.
