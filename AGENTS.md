@@ -383,11 +383,11 @@ bar 4           # beats per bar (default 4)
 step eighths    # how long one column lasts (default: an 8th note)
 strum 55        # default strum width ms for multi-note events (0 = blocked)
 release 1200    # damp each note 1200ms in; 0/absent = let ring (default)
-  C       Am      F       G    # a chord line: one chord per bar, padded onto
+  D       Bm      G       A    # a chord line: one chord per bar, padded onto
                                 # the ruler's marks (padding is cosmetic —
                                 # whitespace separates the chords either way)
-e|5---5---7---7---8---8---7---5---|
-B|----------------3---5---5---3---|
+e|7---7---9---9---10--10--9---7---|
+B|----------------5---7---7---5---|
 G|--------------------------------|
 ```
 
@@ -434,7 +434,7 @@ when reading a progression, and a voicing you cannot see is one you cannot
 check — so the readout has a `chordShape` column (`xx201x`, low string first,
 `x` = muted, from `riff.ts` so it is testable). Printing it exposed the actual
 bug: **`guitarTransition` (`song.ts`) charges nothing for a string muted in
-BOTH voicings**, so muting is free and the shortest path through `C Am F G`
+BOTH voicings**, so muting is free and the shortest path through `D Bm G A`
 collapses to three strings (`C = xx201x` where a guitarist plays `x32010`).
 That is a real sound problem — a thin, hollow chord — and a change to the cost
 function, so it is a musical decision and is NOT made here. `smoke.mjs`

@@ -672,7 +672,15 @@ throws(() => parseRiff("wibble 5", riffOpts), "directive: misspelled keyword thr
       // character in the bar ruler. That padding is the whole "these two layers
       // share one grid" demonstration, and it is invisible until it drifts —
       // so assert the alignment instead of trusting the eyeball.
-      const chordLine = text.split("\n").find((l) => /\bC\b\s+Am\b/.test(l));
+      const chordLine = text
+        .split("\n")
+        .find(
+          (l) =>
+            l.trim() &&
+            !l.trim().startsWith("#") &&
+            !/^\s*[eBGDAE]\s*\|/.test(l) &&
+            !/^(tempo|bpm|bar|step|grid|strum|release)\b/i.test(l.trim()),
+        );
       const laneLine = text.split("\n").find((l) => /^[eBGDAE]\|/.test(l));
       if (chordLine && laneLine) {
         const LANE_PREFIX = 2; // a lane body starts after its `e|`

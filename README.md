@@ -102,9 +102,9 @@ The shape is printed, drawn as a chord diagram, and **▶ Hear it** plays it alo
 
 A stepped choice is **pinned**: it plays exactly those frets and the chords
 *after* it re-optimise around it. **Auto** hands the chord back to the search.
-One `best ▲` on the shipped `C Am F G` takes the whole progression from
-`xx201x xx221x xx321x xx000x` to `032010 032210 133211 320003` — the open
-shapes — and then ◀ ▶ walks the rest.
+On the shipped `D Bm G A`, every chord starts with whatever shape the
+search picked to minimize hand movement — step ◀ ▶ through what the search
+found (ordered smoothest first) and `best ▲` jumps back to the top.
 
 **What you'll hear** under the track reads the plan back: one row per *moment*
 with its bar, beat, seconds, the shape, the sounding note names, and whether the
@@ -117,9 +117,9 @@ bar 4           # beats per bar
 step eighths    # how long one column lasts (0.5 = eighths)
 strum 55        # strum width in ms for multi-note events (0 = all at once)
 release 1200    # damp each note 1.2s in (omit = let it ring, the default)
-C Am F G        # chord line: one chord per bar (or `C|Am|F|G`)
-e|5---5---7---7---8---8---7---5---|
-B|----------------3---5---5---3---|
+D Bm G A        # chord line: one chord per bar (or `D|Bm|G|A`)
+e|7---7---9---9---10--10--9---7---|
+B|----------------5---7---7---5---|
 G|--------------------------------|
 ```
 
@@ -133,7 +133,7 @@ together**: a chord and a tab note on the same beat are one moment, the note
 sounding *on top of* the chord, exactly as you would strum it. That is what a
 chord chart printed above tab means in a songbook. So the two lines are layers,
 not two ways of writing the same music — and the readout says so per moment
-(`C + 5 | xx201x | E3 G3 C4 with A4 on top`) rather than printing two rows at
+(`D2 + 7 | x0xx32 | D3 F#3 A3 with B3 on top`) rather than printing two rows at
 the same time, which read as a duplicate. The `xx201x` is the shape the app
 chose, printed low string first with `x` for a muted string — the tab for a
 chord you only typed as a letter, so you can read it, check it, and paste it
@@ -149,7 +149,7 @@ and a tab lane is one character per column, so without the ruler you had to
 count columns to find out that `C` and the tab's first note are the same
 instant. Padding the chord line so its tokens land on the numbers lines the two
 layers up visually — it changes nothing you hear, since whitespace separates the
-chords either way. The shipped example is padded; `C Am F G` is the same music.
+chords either way. The shipped example is padded; `D Bm G A` is the same music.
 
 `step` sets the grid, and it takes a plain number of beats or a note-value
 name: `quarter`, `eighths`, `sixteenths`, `eighth triplets`, `1/8`, `16ths`,
