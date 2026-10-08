@@ -49,6 +49,14 @@ test("a tab note's region ends at the next tab note, ringing through rests", () 
   assert.equal(s.end(2, "note"), s.totalBeats, "the last note rings out");
 });
 
+test("a lone tab note rings one full bar, not to the end of the piece", () => {
+  // Tab note at column 0 = beat 0; the lane covers 20 columns (10 beats).
+  // Its region used to bleed to beat 10; now caps at the same OFFBEAT-EVEN
+  // bar boundary — the empty-bar clamp from `regionEnds` is what enforces it.
+  const s = spans("tempo 96\ne|5-------------------|");
+  assert.equal(s.end(0, "note"), 4, "the note spans one 4-beat bar from beat 0");
+});
+
 test("a chord and a tab note on the same beat keep their own spans", () => {
   // The union case: C (beat 0) plays with a tab note on top (beat 0). The
   // chord must NOT be cut short by the melody notes above it.

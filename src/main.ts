@@ -42,6 +42,17 @@ function playabilityScore(frets: (number | null)[]): number {
 function rankFingerings(fingerings: Fingering[]): Fingering[] {
   return [...fingerings].sort((a, b) => playabilityScore(a.frets) - playabilityScore(b.frets));
 }
+
+/** The chord root's pitch class (0..11) for a set of selected pitch classes,
+ *  derived from the identified chord name; null when the set isn't a known
+ *  chord (a raw slash chord etc.). */
+function chordRootPitchClass(pitchClasses: number[]): number | null {
+  try {
+    return parseChord(chordName(pitchClasses).primary).root;
+  } catch {
+    return null;
+  }
+}
 import { findPianoVoicings, type PianoVoicing } from "./piano.js";
 import { colorFor, el, renderChordDiagram, renderPiano, renderPianoVoicing, renderPositions } from "./render.js";
 import {
@@ -49,6 +60,7 @@ import {
   midiName,
   noteLabels,
   noteName,
+  parseChord,
   parseStringMidi,
   TUNINGS,
   type ParsedChord,
@@ -97,6 +109,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const fretsInput = document.getElementById("frets") as HTMLInputElement;
   const stringsUsedMinInput = document.getElementById("strings-used-min") as HTMLInputElement;
   const stringsUsedMaxInput = document.getElementById("strings-used-max") as HTMLInputElement;
+  const rootBassInput = document.getElementById("root-bass") as HTMLInputElement;
   const strumInput = document.getElementById("strum") as HTMLInputElement;
   const kitButton = document.getElementById("kit") as HTMLButtonElement;
   const pianoLowInput = document.getElementById("piano-low") as HTMLInputElement;
@@ -356,6 +369,7 @@ document.addEventListener("DOMContentLoaded", () => {
     stringsUsedMax: number;
     pianoLow: number;
     pianoHigh: number;
+    rootBass: boolean;
   }
 
   function readParams(): Params {
@@ -366,7 +380,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const pianoLow = Math.min(108, Math.max(21, parseInt(pianoLowInput.value, 10) || 48));
       const pianoHigh = Math.min(108, Math.max(21, parseInt(pianoHighInput.value, 10) || 84));
       if (pianoLow >= pianoHigh) throw new Error("Lowest key must be below the highest key.");
-      return { pitchClasses, span, cap, tuning: TUNINGS[0].midi, fretCount: 15, stringsUsedMin: 4, stringsUsedMax: 6, pianoLow, pianoHigh };
+      return { pitchClasses, span, cap, tuning: TUNINGS[0].midi, fretCount: 15, stringsUsedMin: 4, stringsUsedMax: 6, pianoLow, pianoHigh, rootBass: rootBassInput.checked };
     }
     const stringsUsedMin = Math.min(6, Math.max(2, parseInt(stringsUsedMinInput.value, 10) || 4));
     const stringsUsedMax = Math.min(6, Math.max(stringsUsedMin, parseInt(stringsUsedMaxInput.value, 10) || 6));
@@ -380,6 +394,7 @@ document.addEventListener("DOMContentLoaded", () => {
       stringsUsedMax,
       pianoLow: 48,
       pianoHigh: 84,
+      rootBass: rootBassInput.checked,
     };
   }
 
@@ -511,8 +526,16 @@ document.addEventListener("DOMContentLoaded", () => {
     if (isPiano) {
       posBoard.replaceChildren(renderPiano(params.pianoLow, params.pianoHigh, params.pitchClasses, nameOf));
       const { voicings, truncated } = findPianoVoicings(params.pitchClasses, params.pianoLow, params.pianoHigh, params.span, params.cap);
-      chordList.appendChild(renderPianoCard(params.pitchClasses, voicings, truncated));
-      chordSummary.textContent = `· ${voicings.length} voicing${voicings.length === 1 ? "" : "s"} for ${chordName(params.pitchClasses).primary}`;
+      const chordRootPc = chordRootPitchClass(params.pitchClasses);
+      const finalVoicings =
+        params.rootBass && chordRootPc !== null
+          ? voicings.filter((v) => Math.min(...v.keys) % 12 === chordRootPc)
+          : [...voicings];
+      // Fullness first: always, whether or not the root-bass filter is on.
+      // Array.sort is stable, so ties keep the piano-voicing find-up order.
+      finalVoicings.sort((a, b) => b.keys.length - a.keys.length);
+      chordList.appendChild(renderPianoCard(params.pitchClasses, finalVoicings, truncated));
+      chordSummary.textContent = `· ${finalVoicings.length} voicing${finalVoicings.length === 1 ? "" : "s"} for ${chordName(params.pitchClasses).primary}${params.rootBass ? " · root in bass" : ""}`;
       return;
     }
 
@@ -520,13 +543,30 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Chord list: every provided note must be in the chord voicing.
     const { fingerings: allFingerings, truncated } = findFingerings(params.pitchClasses, params.tuning, params.fretCount, params.span, params.cap);
+    const chordRootPc = chordRootPitchClass(params.pitchClasses);
     const filtered = allFingerings.filter((f) => {
       const used = f.frets.filter((fr) => fr !== null).length;
-      return used >= params.stringsUsedMin && used <= params.stringsUsedMax;
+      if (used < params.stringsUsedMin || used > params.stringsUsedMax) return false;
+      if (params.rootBass && chordRootPc !== null) {
+        let s = 0;
+        while (s < f.frets.length && f.frets[s] === null) s++;
+        if (s < f.frets.length) {
+          const bassPc = (params.tuning[s] + f.frets[s]!) % 12;
+          if (bassPc !== chordRootPc) return false;
+        }
+      }
+      return true;
     });
-    const isFiltered = params.stringsUsedMin > 2 || params.stringsUsedMax < 6;
+    const isFiltered = params.stringsUsedMin > 2 || params.stringsUsedMax < 6 || params.rootBass;
+    const extraLabel = params.rootBass ? " · root in bass" : "";
+    // Fullness first: always, whether or not root-bass is on. Stable sort,
+    // so ties keep the playability ranking from rankFingerings underneath.
+    filtered.sort(
+      (a, b) =>
+        b.frets.filter((fr) => fr !== null).length - a.frets.filter((fr) => fr !== null).length,
+    );
     chordList.appendChild(renderChordCard(params.pitchClasses, filtered, truncated && !isFiltered, params.tuning));
-    chordSummary.textContent = `· ${filtered.length} fingering${filtered.length === 1 ? "" : "s"} for ${chordName(params.pitchClasses).primary}${isFiltered ? ` · ${params.stringsUsedMin}-${params.stringsUsedMax} strings` : ""}`;
+    chordSummary.textContent = `· ${filtered.length} fingering${filtered.length === 1 ? "" : "s"} for ${chordName(params.pitchClasses).primary}${params.stringsUsedMin > 2 || params.stringsUsedMax < 6 ? ` · ${params.stringsUsedMin}-${params.stringsUsedMax} strings` : ""}${extraLabel}`;
   }
 
   form.addEventListener("submit", (e) => {
@@ -538,6 +578,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Live-update the chord list when "strings used" range changes.
   stringsUsedMinInput.addEventListener("input", () => run());
   stringsUsedMaxInput.addEventListener("input", () => run());
+  rootBassInput.addEventListener("change", () => run());
 
   run();
 });

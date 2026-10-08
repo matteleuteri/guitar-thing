@@ -85,7 +85,16 @@
               spellcheck="false"
               title="Type a chord name and press Enter to add it as a draggable chip"
             />
+            <button id="chord-add-btn" type="button" title="Pick a chord from a grid instead of typing it">+</button>
           </div>
+          <div id="chord-palette" hidden>
+            <div id="chord-palette-roots" class="chord-palette-row"></div>
+            <div id="chord-palette-quals" class="chord-palette-row"></div>
+          </div>
+          <label class="voicing-filter">
+            <input id="root-bass" type="checkbox" checked title="Only list chord voicings whose lowest sounding string is the chord root" />
+            Root in the bass
+          </label>
           <div id="voicing-tabs" class="voicing-tabs"></div>
           <div id="voicing-picker" class="voicing-picker"></div>
         </div>

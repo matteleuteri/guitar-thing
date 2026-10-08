@@ -349,6 +349,11 @@ whether the input box could specify it (it could not: `C x32010`, `C/x32010`,
   at rank 350 of 400 and made ◀ ▶ walk *deeper* into the thin tail. Because the
   order is best-first, the picker also needs a `best ▲` jump — the arrows alone
   cannot get you off a deep rank.
+- From Oct 6, the VISIBLE browse list is re-sorted fullness-first (most
+  sounding strings at the top) on top of that cost-anchored order, and a
+  chord tab OPENS at that fullness-sorted list[0] rather than the shipped
+  plan's shape. The root-bass checkbox defaults ON for stripping lists to
+  root-bass voicings; it does not gate the sort.
 - `chordShape`/`parseChordShape` live in `fretboard.ts` (with the frets they
   format) and a shape is the *identity* of a pin, so a pin is printable,
   copyable and testable.

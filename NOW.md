@@ -75,6 +75,15 @@ pending-chord "Use" button no longer grays out after ◀ ▶ (browse and
 commit are separate state), the lead-in beat is gone (`LEAD_IN_BEATS = 0`),
 and the string names live in a sticky left gutter outside the track canvas.
 
+**Oct 6 2026 (uncommitted):** the riff picker's chord tabs now open on the
+fullness-sorted list[0] (not the shipped plan's shape); the root-in-bass
+checkbox (now checked by default on both pages) plus a fullness-first stable
+sort drives every browse list. Also from Oct 6: the "+" button next to the
+chord input opens a root × quality grid, the Clear track button empties the
+tab without losing the grid (parseRiff demoted its two empty-stream throws
+to a warning), note regions cap at one 4-beat bar, and a rest-only chord
+stream no longer crashes the converter.
+
 **Oct 4-5 2026 (four unpushed commits on `main`):**
 - `4396bb1` — `.track-loop` no longer swallows dragover/drop (pointer-events: none): drops on newly-added bars were dead because the loop overlay ate the events. Also loop inputs reset to the whole riff when the bar count changes (previously a longer riff silently clipped its loop), and `ensure()` in audio.ts no longer dies on browsers without the Audio Worklet API.
 - `1831f92` — **Clear track** button (`riff.html` + `src/riff-main.ts`): every chord token becomes a rest bar, every lane cell a rest at the same widths; pins/preview reset; `parseRiff` no longer throws on a rest-only stream — it returns a valid zero-event riff with a "Nothing to play" warning, so the empty grid remains visible (previously the error path also left a stale track on screen).

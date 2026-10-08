@@ -6,6 +6,7 @@ import {
   noteName,
   parseChord,
   parseStringMidi,
+  SHARP_NAMES as theorySharpNames,
   TUNINGS,
 } from "./theory.js";
 import {
@@ -480,7 +481,12 @@ function renderBuilders(): void {
 
 chordAddInput.addEventListener("keydown", (event) => {
   if (event.key !== "Enter") return;
-  const name = chordAddInput.value.trim();
+  addPendingChord(chordAddInput.value.trim());
+});
+
+/** Shared add-pending-chord helper: the text input's Enter and the chip
+ *  palette's clicks both funnel through here. */
+function addPendingChord(name: string): void {
   if (!name) return;
   try {
     const chord = parseChord(name);
@@ -499,7 +505,56 @@ chordAddInput.addEventListener("keydown", (event) => {
     chordAddInput.classList.add("is-invalid");
     chordAddInput.title = `"${name}" is not a chord the app understands`;
   }
-});
+}
+
+// ------------------------------------------------ chord palette (+ chord) ----
+
+const chordPalette = document.getElementById("chord-palette") as HTMLDivElement;
+const chordPaletteRoots = document.getElementById("chord-palette-roots") as HTMLDivElement;
+const chordPaletteQuals = document.getElementById("chord-palette-quals") as HTMLDivElement;
+const chordAddBtn = document.getElementById("chord-add-btn") as HTMLButtonElement;
+
+let selectedQualSuffix = "";
+const CHORD_QUALITIES: { label: string; suffix: string }[] = [
+  { label: "maj", suffix: "" },
+  { label: "m", suffix: "m" },
+  { label: "7", suffix: "7" },
+  { label: "maj7", suffix: "maj7" },
+  { label: "m7", suffix: "m7" },
+  { label: "sus4", suffix: "sus4" },
+  { label: "sus2", suffix: "sus2" },
+  { label: "dim", suffix: "dim" },
+  { label: "aug", suffix: "aug" },
+];
+
+if (chordPaletteRoots && chordPaletteQuals && chordPalette && chordAddBtn) {
+  const rootName = (i: number) => theorySharpNames[i];
+  for (let pc = 0; pc < 12; pc++) {
+    const rootBtn = el("button", "builder-chip builder-chord", rootName(pc)) as HTMLButtonElement;
+    rootBtn.type = "button";
+    rootBtn.addEventListener("click", () => {
+      addPendingChord(`${rootName(pc)}${selectedQualSuffix}`);
+    });
+    chordPaletteRoots.appendChild(rootBtn);
+  }
+  for (const quality of CHORD_QUALITIES) {
+    const qualBtn = el("button", "builder-chip", quality.label) as HTMLButtonElement;
+    qualBtn.type = "button";
+    if (quality.suffix === selectedQualSuffix) qualBtn.classList.add("is-active");
+    qualBtn.addEventListener("click", () => {
+      selectedQualSuffix = quality.suffix;
+      for (const sibling of chordPaletteQuals.children) {
+        (sibling as HTMLButtonElement).classList.remove("is-active");
+      }
+      qualBtn.classList.add("is-active");
+    });
+    chordPaletteQuals.appendChild(qualBtn);
+  }
+  chordAddBtn.addEventListener("click", () => {
+    chordPalette.hidden = !chordPalette.hidden;
+  });
+  (document.getElementById("root-bass") as HTMLInputElement | null)?.addEventListener("change", () => render());
+}
 
 /**
  * Re-parse, re-render, and (re)start. Everything that can change the plan calls
@@ -565,6 +620,42 @@ interface VoicingView {
   pinned: boolean;
 }
 
+/** The root-in-bass filter shared by both chord browsers (committed chord and
+ *  the pending-to-add one): keep only voicings whose lowest sounding string is
+ *  the chord root. */
+function filterRootInBass(
+  list: RankedVoicing[],
+  pitchClasses: number[] | undefined,
+  tuning: number[],
+): RankedVoicing[] {
+  const input = document.getElementById("root-bass") as HTMLInputElement | null;
+  if (!input?.checked || !pitchClasses) {
+    // The fullness-first ordering applies ALWAYS (even with the filter off);
+    // stable sort, so ties keep the movement-cost ordering underneath.
+    return [...list].sort((a, b) => b.sounded - a.sounded);
+  }
+  let root: number | null = null;
+  try {
+    root = parseChord(chordName(pitchClasses).primary).root;
+  } catch {
+    return list;
+  }
+  return list
+    .filter((entry) => {
+      for (let s = 0; s < entry.frets.length; s++) {
+        const fret = entry.frets[s];
+        if (fret !== null) {
+          return ((tuning[s] + fret) % 12) === root;
+        }
+      }
+      return false;
+    })
+    // Fullness first: among root-in-bass voicings, the ones sounding the
+    // MOST strings read as the primary results. Stable sort, so ties keep
+    // the movement-cost ordering underneath.
+    .sort((a, b) => b.sounded - a.sounded);
+}
+
 function voicingViews(): VoicingView[] {
   if (!plan) return [];
   const tuning = readTuning();
@@ -575,7 +666,7 @@ function voicingViews(): VoicingView[] {
     // Rank from the shape the PREVIOUS chord is actually using, so a pin
     // upstream reorders this chord's options the moment it is stepped.
     const previous = views.length > 0 ? views[views.length - 1] : null;
-    const list = rankGuitarVoicings(
+    const rawList = rankGuitarVoicings(
       event.chord.pitchClasses,
       tuning,
       readInt(fretsInput, 15),
@@ -583,8 +674,13 @@ function voicingViews(): VoicingView[] {
       previous ? previous.list[previous.rank].frets : null,
       readInt(capInput, 400),
     );
+    const list = filterRootInBass(rawList, event.chord.pitchClasses, tuning);
     const shape = chordShape(event.frets);
-    const rank = list.findIndex((entry) => entry.shape === shape);
+    // The browser OPENS on the first (fullest) voicing, not the shape the
+    // shipped plan happens to have picked: movement cost is for later, once
+    // the user has a pinned chord in hand. (The find-up order keeps the
+    // stable cost ordering underneath for stepping comparisons.)
+    const rank = 0;
     views.push({
       event,
       index: views.length,
@@ -658,7 +754,7 @@ function renderVoicingPicker() {
     const prevFrets = previous
       ? previous.list[previous.rank]?.frets ?? previous.event.frets
       : null;
-    const list = rankGuitarVoicings(
+    const rawList = rankGuitarVoicings(
       parsed.pitchClasses,
       readTuning(),
       readInt(fretsInput, 15),
@@ -666,6 +762,7 @@ function renderVoicingPicker() {
       prevFrets,
       readInt(capInput, 400),
     );
+    const list = filterRootInBass(rawList, parsed.pitchClasses, readTuning());
     const committed = preview.get(pending.key);
     const chosenShape = pendingBrowse ?? committed ?? list[0]?.shape ?? "";
     const current = list.find((entry) => entry.shape === chosenShape) ?? list[0];

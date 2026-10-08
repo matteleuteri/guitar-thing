@@ -497,6 +497,41 @@ header p { color: var(--muted); max-width: 70ch; margin-top: .25rem; }
   width: 9.5rem;
   font-size: .8rem;
 }
+#chord-add-btn {
+  font-size: .9rem;
+  padding: .15rem .5rem;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, .16);
+  background: var(--panel);
+  color: inherit;
+  cursor: pointer;
+}
+#chord-add-btn:hover { filter: brightness(1.25); }
+#chord-palette {
+  margin-top: .4rem;
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+}
+#chord-palette[hidden] {
+  display: none;
+}
+.chord-palette-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .3rem;
+}
+.chord-palette-row .builder-chip.is-active {
+  outline: 2px solid var(--accent);
+}
+.voicing-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  font-size: .78rem;
+  color: var(--muted);
+  margin-top: .3rem;
+}
 #chord-add.is-invalid {
   border-color: var(--error);
   outline: none;

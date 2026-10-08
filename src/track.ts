@@ -69,6 +69,11 @@ export function regionEnds(events: RiffEvent[], totalBeats: number, beatsPerBar 
     const next = nextOfKind.get(events[i].kind);
     if (next !== undefined) ends[i] = events[next].beat;
     nextOfKind.set(events[i].kind, i);
+    // A note's ring is capped at one bar: a lone tab note (e.g. clicked into
+    // a lane) shows as one full bar of lane - not bleeding to the next note of
+    // the same kind, which could be bars away. Chords are exempt: a lone
+    // chord ringing out is musically sensible.
+    if (events[i].kind === "note") ends[i] = Math.min(ends[i], events[i].beat + beatsPerBar);
   }
   // A silent bar (no chord, no tab note) is a real rest: a chord or note
   // region must not ring across it, even when the next same-kind event is
