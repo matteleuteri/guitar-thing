@@ -84,6 +84,19 @@ tab without losing the grid (parseRiff demoted its two empty-stream throws
 to a warning), note regions cap at one 4-beat bar, and a rest-only chord
 stream no longer crashes the converter.
 
+**Oct 14 2026 (uncommitted): a THIRD page — the Note Identifier.**
+`tuner.html` + `src/pitch.ts` + `src/tuner-main.ts`: listen through the
+microphone and name the single note being played (name, octave, Hz, cents, a
+needle meter). The detector is **YIN**, chosen because plain autocorrelation
+read a clean 440 Hz tone as 110 Hz (octave-down bias, confidently wrong); it
+is unit-tested against synthetic sines in `tests/pitch.test.mjs` and verified
+end-to-end in headless Chrome with a fake 440 Hz audio-capture WAV (→ `A` /
+octave 4 / 440.02 Hz / 0¢). Added to the Pages `cp` line and the smoke
+assertions (a page missing from that line 404s live and nothing local would
+notice). Needs a secure context (`https` or `localhost`); the page says so
+plainly if the mic API is hidden. Single notes only — a strummed chord has no
+one fundamental.
+
 **Oct 4-5 2026 (four unpushed commits on `main`):**
 - `4396bb1` — `.track-loop` no longer swallows dragover/drop (pointer-events: none): drops on newly-added bars were dead because the loop overlay ate the events. Also loop inputs reset to the whole riff when the bar count changes (previously a longer riff silently clipped its loop), and `ensure()` in audio.ts no longer dies on browsers without the Audio Worklet API.
 - `1831f92` — **Clear track** button (`riff.html` + `src/riff-main.ts`): every chord token becomes a rest bar, every lane cell a rest at the same widths; pins/preview reset; `parseRiff` no longer throws on a rest-only stream — it returns a valid zero-event riff with a "Nothing to play" warning, so the empty grid remains visible (previously the error path also left a stale track on screen).

@@ -291,7 +291,7 @@ The live site is https://matteleuteri.github.io/guitar-thing/. It is **not** bui
 from the local `dist/` (that folder is gitignored). CI owns it:
 
 - `.github/workflows/pages.yml` runs on every push to `main`: `npm ci` → `npm run
-  build` → copies `index.html`, `riff.html`, `style.css`, `dist/`, `debug/`, `assets/` into
+  build` → copies `index.html`, `riff.html`, `tuner.html`, `style.css`, `dist/`, `debug/`, `assets/` into
   `_site/` → uploads as a Pages artifact → `actions/deploy-pages`. No secrets
   used.
 - Live site updates a minute or two after a push. `gh run watch` on the latest
@@ -310,12 +310,13 @@ from the local `dist/` (that folder is gitignored). CI owns it:
 - Local development is fully independent: edit → `npm run build` → `node
   server.mjs` → `localhost:5173`. Committing without pushing never affects the
   live site.
-- All asset paths in `index.html` (`style.css`, `./dist/main.js`, `debug/`) and
-  in `riff.html` (`style.css`, `./dist/riff-main.js`) are relative, so the
+- All asset paths in `index.html` (`style.css`, `./dist/main.js`, `debug/`),
+  `riff.html` (`./style.css`, `./dist/riff-main.js`) and `tuner.html`
+  (`./style.css`, `./dist/tuner-main.js`) are relative, so the
   `/guitar-thing/` subdirectory hosting works unchanged. **The workflow copies
   pages by name** — a new page that is not in its `cp` line is a 404 in
-  production and nothing local would notice. `smoke.mjs` asserts `riff.html` is
-  in the list. The
+  production and nothing local would notice. `smoke.mjs` asserts `riff.html`
+  and `tuner.html` are in the list. The
   audio catables (`assets/guitar-steel-ogg.js`, `assets/smplr.mjs`) ship the
   same way — see the Audio section below.
 
@@ -587,13 +588,66 @@ comparing each note's *centre* to the playhead, at a width that scrolls and one
 that fills, and assert the note COUNT: a probe that skips missing notes reports
 "perfect" for an empty timeline.
 
+## Note identifier (tuner.html)
+
+**Its own page, and the only one that takes input from the world instead of
+from a form.** The user asked "what note am I playing" and it is answered by
+listening to the microphone: `getUserMedia` → `AnalyserNode` →
+`getFloatTimeDomainData` on a `requestAnimationFrame` loop → `detectPitch` →
+a big note name, the octave, Hz, cents deviation and a needle meter.
+**Single notes only** — a strummed chord has no one fundamental, so the page
+says so rather than pretending. It reuses `theory.ts` (`noteLabels`) for the
+spelling; it does not touch `audio.ts` at all (playback and capture are
+unrelated paths).
+
+- **The detector is YIN, and the reason is octave errors.** The obvious
+  detector is autocorrelation, and the obvious version *fails here*: raw
+  autocorrelation peaks again at every multiple of the period, and because a
+  longer lag compares fewer samples the tallest normalized peak is often an
+  octave (or two) **down** — during development a clean 440 Hz tone read as
+  110 Hz and a 329.63 Hz tone as 82.41 Hz, with clarity `0.9999` (i.e. it was
+  confidently wrong). The fix is the cumulative-mean-normalized difference
+  function `d'(tau) = d(tau) / ((1/tau) * Σ d(j))`, whose first dip below a
+  threshold is the fundamental period; YIN picks that first dip, so the
+  fundamental wins over its own multiples. A normalized-autocorrelation
+  variant is still not enough — it has the same long-lag bias.
+- **Two silent traps already paid for.** (1) The scan must fill every lag's
+  correlation *before* an early `break` on a near-perfect match, or the
+  parabolic interpolation reads an uninitialized `corrCache[lag+1]` (which is
+  `0`) and pushes the estimate a half-sample off (440 Hz → 443.18 Hz, +12
+  cents). (2) The peak offset is `(c0 - c2) / (2 * (c0 - 2c1 + c2))`; getting
+  the sign of `denom` wrong moves the estimate away from the peak. Both are
+  tested: `tests/pitch.test.mjs` feeds synthetic sines (with harmonics) and
+  asserts the exact MIDI note and sub-5-cent accuracy, that a loud octave
+  partial does not become the reported note, and that silence / too-short
+  frames / sub-cutoff tones return `null` rather than a confident wrong note.
+- **The page needs a secure context.** Browsers only expose
+  `navigator.mediaDevices` over `https://` or `localhost`; on a plain
+  `http://<lan-ip>` the API is simply absent. `tuner-main.ts` checks for it up
+  front and says so in plain words instead of throwing
+  "Cannot read properties of undefined". Local dev over `localhost:5173` and
+  the live Pages `https://` site are both fine — the LAN-IP case is the only
+  one that bites (and it bit the first browser test, which ran on the WSL IP).
+- **A real-browser test exists and needs Chrome's fake audio device.** The
+  detector is unit-tested in Node, but the mic wiring is not. To end-to-end it:
+  launch Chrome with
+  `--use-fake-device-for-media-stream --use-fake-ui-for-media-stream
+  --use-file-for-fake-audio-capture=<a 440 Hz .wav>` (and, if the page is not
+  on localhost, `--unsafely-treat-insecure-origin-as-secure=<origin>` so
+  `mediaDevices` exists), click Start, and read the DOM back. Verified: a
+  file-fed A4 WAV reads as note `A`, octave `4`, `440.02 Hz`, `0¢`, clarity
+  `1.00`, no console errors. Note the debug port only binds loopback, so the
+  CDP client must run on the Windows side (see the probe under
+  `debug/`-adjacent tooling), not from WSL.
+
 ## Structure
 
 - `index.html` (the finder), `riff.html` (the riff builder) + `src/riff-main.ts`
-  (its entry point) — two pages, dark theme. CSS class prefixes: `fb-`
+  (its entry point), `tuner.html` (the note identifier) + `src/tuner-main.ts`
+  (its entry point) — three pages, dark theme. CSS class prefixes: `fb-`
   (fretboard positions), `cd-` (chord diagram), `riff-` (riff notation/reading
-  and `voicing-` for the picker), `track-` (the unified track view),
-  `.diagrams`, `.chord-card`.
+  and `voicing-` for the picker), `track-` (the unified track view), `tuner-`
+  (the note identifier), `.diagrams`, `.chord-card`.
 - `src/theory.ts` — pitch classes, parsing, tunings, chord-name identification.
 - `src/fretboard.ts` — `findPositions` + `findFingerings` (guitar core algorithm).
 - `src/piano.ts` — `findPianoKeys` + `findPianoVoicings` (piano core algorithm).
@@ -682,6 +736,13 @@ that fills, and assert the note COUNT: a probe that skips missing notes reports
   finder's entry point; no riff code).
 - `src/riff-main.ts` — the riff builder's wiring: notation editor, voicing
   browser + pins, transport (its entry point).
+- `src/pitch.ts` — the note identifier's monophonic pitch detector (YIN). Pure
+  arithmetic over one PCM frame: `detectPitch(samples, sampleRate)` → the
+  fundamental Hz, nearest MIDI note, cents, clarity and RMS, or `null` for
+  silence/aperiodic input. Unit-tested in `tests/pitch.test.mjs`.
+- `src/tuner-main.ts` — the note identifier's wiring: mic capture
+  (`getUserMedia` → `AnalyserNode`), a `requestAnimationFrame` read loop, and
+  the note/cents readout (its entry point).
 - `scripts/smoke.mjs` — Node checks of the compiled theory/fingering output.
 - `scripts/audio-sched.mjs` — Node checks of the compiled audio *scheduling* graph
   (stubbed Web Audio): every voice must be silent from t=0 until its strum slot,

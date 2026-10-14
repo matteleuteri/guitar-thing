@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Note Identifier</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header>
+    <h1>Note Identifier</h1>
+    <p>
+      Uses your microphone to identify the note you're playing. Single notes work best.
+      <a href="./index.html">Note/Chord Finder →</a>
+      · <a href="./riff.html">Riff builder →</a>
+    </p>
+  </header>
+
+  <section id="controls">
+    <div class="field">
+      <button type="button" id="start">Start listening</button>
+      <button type="button" id="stop" disabled>Stop</button>
+    </div>
+    <p id="status" class="muted">Idle</p>
+    <p id="error" class="error" hidden></p>
+  </section>
+
+  <section id="tuner">
+    <div class="tuner-display">
+      <div id="note" class="tuner-note">—</div>
+      <div class="tuner-meta">
+        <div>Octave: <span id="octave">—</span></div>
+        <div>Frequency: <span id="freq">— Hz</span></div>
+        <div>Cents: <span id="cents">—</span></div>
+        <div>Clarity: <span id="clarity">—</span></div>
+        <div>RMS: <span id="rms">—</span></div>
+      </div>
+    </div>
+    <div class="tuner-meter" aria-label="Cents deviation meter">
+      <div class="tuner-meter-track"></div>
+      <div id="needle" class="tuner-needle" style="left:50%"></div>
+      <div class="tuner-meter-center"></div>
+      <div class="tuner-meter-labels">
+        <span>-50</span><span>-25</span><span>0</span><span>+25</span><span>+50</span>
+      </div>
+    </div>
+    <p class="muted">Tuning A4 = 440 Hz. Cents shows deviation from the nearest equal-tempered note.</p>
+  </section>
+
+  <script type="module" src="./dist/tuner-main.js"></script>
+</body>
+</html>

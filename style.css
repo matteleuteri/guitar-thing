@@ -1149,3 +1149,63 @@ h2 .muted { font-size: .85rem; font-weight: 400; color: var(--muted); }
   border-color: var(--accent, #6ea8fe);
   background: var(--panel, #1d222a);
 }
+/* Note Identifier page (tuner.html) */
+.tuner-display {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  margin: 1rem 0;
+}
+.tuner-note {
+  font-size: 5rem;
+  font-weight: 700;
+  line-height: 1;
+}
+.tuner-meta {
+  color: #cbd5e1;
+  line-height: 1.4;
+}
+.tuner-meter {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  height: 90px;
+  margin: 0.5rem 0 1rem;
+}
+.tuner-meter-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 40px;
+  height: 4px;
+  background: linear-gradient(90deg, #dc2626 0%, #f59e0b 25%, #22c55e 50%, #f59e0b 75%, #dc2626 100%);
+  border-radius: 2px;
+}
+.tuner-meter-center {
+  position: absolute;
+  left: 50%;
+  top: 36px;
+  width: 2px;
+  height: 12px;
+  margin-left: -1px;
+  background: #e2e8f0;
+}
+.tuner-needle {
+  position: absolute;
+  top: 34px;
+  width: 2px;
+  height: 16px;
+  margin-left: -1px;
+  background: #e2e8f0;
+  transition: left 40ms linear;
+}
+.tuner-meter-labels {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 60px;
+  display: flex;
+  justify-content: space-between;
+  color: #94a3b8;
+  font-size: 0.875rem;
+}

@@ -1,11 +1,13 @@
 # Guitar Thing
 
-A tiny web app for guitarists. Two pages:
+A tiny web app for guitarists. Three pages:
 
 1. **Note/Chord Finder** — shows every fretboard position of a set of notes and every
    chord voicing (with optional sound) that stays within a small fret span.
 2. **Riff Builder** — write a chord stream and/or tab lane, hear it on a loop, and
    walk each chord through its voicings until it's the shape you'd actually play.
+3. **Note Identifier** — listen through the microphone and tell you what single
+   note you're playing (name, octave, frequency and how many cents off pitch).
 
 ## Run
 
@@ -96,15 +98,17 @@ for a shape, and the search is a guess: it minimises hand movement, and because
 it charges nothing for a muted string it will happily hand you a three-string
 `xx201x` where a guitarist plays `x32010`. The **Chord voicings** panel lists
 one tab per chord in the progression; pick one and step through what the search
-found, ordered by how little your hand moves from the chord before it (ties go
-to the fuller, lower-on-the-neck shape, which is the one you would reach for).
+found. Each tab opens on the **fullest** voicing (most sounding strings), then
+steps through the rest in hand-movement order, so the fuller, lower-on-the-neck
+shapes — the ones you would reach for — come first.
 The shape is printed, drawn as a chord diagram, and **▶ Hear it** plays it alone.
 
 A stepped choice is **pinned**: it plays exactly those frets and the chords
 *after* it re-optimise around it. **Auto** hands the chord back to the search.
-On the shipped `D Bm G A`, every chord starts with whatever shape the
-search picked to minimize hand movement — step ◀ ▶ through what the search
-found (ordered smoothest first) and `best ▲` jumps back to the top.
+On the shipped `D Bm G A`, every chord opens on its fullest shape — step ◀ ▶ to
+walk the list and `best ▲` jumps back to the top. The **Root in bass** switch
+(on by default) strips the list to voicings whose lowest string is the chord's
+root.
 
 **What you'll hear** under the track reads the plan back: one row per *moment*
 with its bar, beat, seconds, the shape, the sounding note names, and whether the
@@ -164,6 +168,23 @@ different character widths (a two-digit fret makes its lane a column longer), th
 short ones are padded with rests and a warning is shown — events stay on the
 columns where they were written.
 Frequencies come from the current tuning, so this works with a custom tuning too.
+
+### Note identifier — its own page
+
+<a href="./tuner.html"><strong>Note Identifier →</strong></a> listens through your
+microphone and tells you what single note you're playing: the note name, its
+octave, the frequency in Hz, and how many cents sharp or flat of the nearest
+equal-tempered note you are, with a needle meter. Press **Start listening** and
+allow mic access; press **Stop** to release it.
+
+It is meant for **one note at a time** (a plucked string, a sung note, a piano
+key). A strummed chord has no single fundamental, so the reading will jump
+around — play the strings one by one. The detector is YIN, which is what keeps a
+note with strong harmonics from being read an octave off.
+
+The browser only exposes the microphone on a **secure page** — `https://` (the
+live site) or `http://localhost` (local dev). Opening the page by a raw LAN IP
+over plain `http://` hides the mic, and the page says so if it happens.
 
 ## Note selection
 

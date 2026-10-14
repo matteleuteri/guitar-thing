@@ -621,9 +621,26 @@ throws(() => parseRiff("wibble 5", riffOpts), "directive: misspelled keyword thr
   // is a 404 on the live site and nothing local would ever notice.
   const workflow = await readFile(new URL("../.github/workflows/pages.yml", import.meta.url), "utf8");
   check(
-    /cp index\.html riff\.html style\.css _site\//.test(workflow),
-    "the Pages workflow copies riff.html (otherwise the live riff builder 404s)",
+    /cp index\.html riff\.html tuner\.html style\.css _site\//.test(workflow),
+    "the Pages workflow copies riff.html and tuner.html (otherwise they 404 live)",
   );
+
+  // ---- The Note Identifier page (tuner.html). ----
+  {
+    const tunerPage = await readFile(new URL("../tuner.html", import.meta.url), "utf8");
+    check(
+      /href="\.\/style\.css"/.test(tunerPage) && /src="\.\/dist\/tuner-main\.js"/.test(tunerPage),
+      "tuner.html is wired to the shared stylesheet and its own entry module",
+    );
+    check(
+      /id="start"/.test(tunerPage) && /id="note"/.test(tunerPage),
+      "tuner.html has the start button and the note readout the entry module binds",
+    );
+    check(
+      /href="\.\/tuner\.html"/.test(index) && /href="\.\/tuner\.html"/.test(riffPage),
+      "both existing pages link to the Note Identifier",
+    );
+  }
 
   // ---- The tool tab strip (Chords / Text / Settings). ----
   // Pure DOM wiring, invisible to the Node tests, so assert its shape here.
